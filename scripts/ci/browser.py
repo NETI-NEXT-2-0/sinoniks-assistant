@@ -318,18 +318,29 @@ def verify_moderated_snapshot(page, probe):
     editor = page.get_by_label("Текст документа для модерации")
     expect(editor).to_have_value(original)
     editor.focus()
-    editor.evaluate("(input, [start, end]) => input.setSelectionRange(start, end)", [
-        original.index(removed), original.index(removed) + len(removed),
-    ])
+    start = original.index(removed)
+    end = start + len(removed)
+    editor.evaluate("(input, [start, end]) => input.setSelectionRange(start, end)", [start, end])
     editor.press("Delete")
     expect(editor).to_have_value(original.replace(removed, ""))
     editor.press("Control+z")
     expect(editor).to_have_value(original)
-    editor.fill(reviewed)
+    page.wait_for_function(
+        "({start, end}) => document.activeElement?.selectionStart === start"
+        " && document.activeElement.selectionEnd === end",
+        arg={"start": start, "end": end},
+    )
+    page.keyboard.insert_text("the help desk")
+    expect(editor).to_have_value(reviewed)
     approve = page.get_by_role("button", name="Подтвердить и подготовить к публикации")
     expect(approve).to_be_disabled()
     page.get_by_role("checkbox", name="Я проверил редакцию текста", exact=False).check()
-    approve.click()
+    with page.expect_request(
+        lambda request: request.method == "POST"
+        and urlsplit(request.url).path == f"{KNOWLEDGE}/versions/{version}/approve"
+    ) as review_request:
+        approve.click()
+    assert review_request.value.post_data_json["reviewed_text"] == reviewed
     publish = page.get_by_role("button", name="Опубликовать", exact=True)
     expect(publish).to_be_enabled(timeout=90_000)
 
