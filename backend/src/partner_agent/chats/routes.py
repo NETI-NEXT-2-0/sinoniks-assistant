@@ -337,6 +337,15 @@ async def fork(
         attachment_ids=[uuid.UUID(value) for value in
                         ((original_run.attachment_ids or []) if original_run else [])],
     )
+    if project_base is None:
+        run.outcome = {"design_input_version": (original_run.outcome or {}).get(
+            "design_input_version", 2,
+        ) if original_run else 2}
+    if body.mode == "regenerate" and original_run is not None and (
+        "project_answer" in (original_run.outcome or {})
+    ):
+        run.outcome = {**(run.outcome or {}),
+                       "project_answer": (original_run.outcome or {})["project_answer"]}
     result = {**await admission_response(db, chat, run), "branch_id": str(branch.id)}
     db.add(RunDesignContext(
         run_id=run.id, base_revision_id=project_base.id if project_base else None,

@@ -8,7 +8,7 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from partner_agent.design_service import context_revision
+from partner_agent.design_service import context_revision, project_readout
 from partner_agent.infra.db import session_factory
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import User
@@ -37,6 +37,10 @@ async def execute_run(
     claim = await claim_run(run_id, dispatch_generation, scheduler_id)
     if claim is None:
         return {"status": "duplicate_or_ineligible", "run_id": str(run_id)}
+    if claim.project_answer is not None:
+        from partner_agent.runtime.project_answer import execute_project_answer
+
+        return await execute_project_answer(claim)
     settings = get_settings()
     if settings.runtime_profile != "offline_fixture":
         parent = asyncio.current_task()
@@ -56,6 +60,7 @@ async def execute_run(
         renewal = asyncio.create_task(renew_real())
         usage: dict[str, int] = {}
         actual_cost: float | None = None
+        provider_started = False
         try:
             async with asyncio.timeout(claim.remaining_seconds):
                 async with session_factory()() as db:
@@ -82,11 +87,17 @@ async def execute_run(
                         )]
                     project_context = None
                     if project is not None:
-                        project_context = dict(project.input)
-                        project_context["exchanges"] = [
-                            {key: value for key, value in flow.items() if key != "sources"}
-                            for flow in project.input["exchanges"]
-                        ]
+                        from partner_agent.requirements_service import without_sources
+
+                        project_context = without_sources(project.input)
+                    new_project = bool(
+                        project is None and current_run.request_mode != "reference"
+                        and (current_run.outcome or {}).get("design_input_version") == 3
+                    )
+                    if new_project:
+                        from partner_agent.requirements_service import new_project_context
+
+                        project_context = new_project_context(current_run.chat_id)
                     private_evidence = await attachment_context(
                         db, actor, current_run, str(question)
                     )
@@ -99,9 +110,11 @@ async def execute_run(
                     await validate_evidence_access(
                         db, actor, [*evidence, *history_sources], chat_id=claim.ownership.chat_id
                     )
+                    calculation = project_readout(project) if project is not None else None
                     prepared = prepare_request(
                         str(question), evidence, history, design_context=project_context,
-                        request_mode=current_run.request_mode,
+                        project_calculation=calculation, request_mode=current_run.request_mode,
+                        new_project=new_project,
                     )
                     evidence = prepared.evidence
                     estimate = estimate_cost_usd(
@@ -119,6 +132,7 @@ async def execute_run(
                     if current_run.request_mode != "auto":
                         options["request_mode"] = current_run.request_mode
                     with accounting_scope(run_id):
+                        provider_started = True
                         result = await answer_with_provider(
                             settings, str(question), evidence, **options,
                         )
@@ -136,14 +150,19 @@ async def execute_run(
                             await db.commit()
                 if actual_cost is not None:
                     enforce_request_cap(settings, actual_cost)
+                answer_mode = result.get("answer_mode", "grounded")
+                answer = result["answer"]
+                if answer_mode == "project_explanation" and project is not None:
+                    answer = f"По сохранённой ревизии №{project.revision}.\n\n{answer}"
                 status = await complete(
                     claim.ownership, "succeeded",
                     {"profile": settings.runtime_profile, "citations": result["citations"],
                      "usage": result["usage"], "estimated_cost_usd": actual_cost,
                      "usage_complete": actual_cost is not None,
-                     "answer_mode": result.get("answer_mode", "grounded")}, result["answer"],
+                     "answer_mode": answer_mode}, answer,
                     evidence=[*evidence, *history_sources],
                     design_input=result.get("design"), design_parent_id=project_parent,
+                    vendor_wishes=result.get("vendor_wishes"),
                 )
                 return {"status": status, "run_id": str(run_id)}
         except asyncio.CancelledError:
@@ -156,6 +175,8 @@ async def execute_run(
                 else getattr(error, "code", "provider_execution_failed")
             )
             failure: dict[str, Any] = {"code": code, "profile": settings.runtime_profile}
+            if not provider_started:
+                failure["provider_calls"] = 0
             if usage:
                 failure.update(usage=usage, estimated_cost_usd=actual_cost,
                                usage_complete=actual_cost is not None)
