@@ -325,12 +325,13 @@ def verify_moderated_snapshot(page, probe):
     expect(editor).to_have_value(original.replace(removed, ""))
     editor.press("Control+z")
     expect(editor).to_have_value(original)
+    page.get_by_role("button", name="Выбрать весь текст", exact=True).click()
     page.wait_for_function(
-        "({start, end}) => document.activeElement?.selectionStart === start"
-        " && document.activeElement.selectionEnd === end",
-        arg={"start": start, "end": end},
+        "length => document.activeElement?.selectionStart === 0"
+        " && document.activeElement.selectionEnd === length",
+        arg=len(original),
     )
-    page.keyboard.insert_text("the help desk")
+    page.keyboard.insert_text(reviewed)
     expect(editor).to_have_value(reviewed)
     approve = page.get_by_role("button", name="Подтвердить и подготовить к публикации")
     expect(approve).to_be_disabled()
