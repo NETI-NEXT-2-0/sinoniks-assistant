@@ -28,6 +28,10 @@ async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
     source_path = os.environ.get("PARTNER_KNOWLEDGE19_SOURCE")
     if not source_path:
         pytest.fail("Supply the private corpus directory explicitly")
+    holdout_path = os.environ.get("PARTNER_KNOWLEDGE19_TEST_HOLDOUT")
+    if not holdout_path:
+        pytest.fail("Supply the private holdout manifest explicitly")
+    holdout_checks = load_checks(Path(holdout_path))
     sources = load_sources(Path(source_path))
     async with session_factory()() as db:
         assert (await db.scalar(text("select current_database()"))).endswith("_test")
@@ -139,9 +143,7 @@ async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
             return outcomes
 
         original = await evaluate(QUESTIONS)
-        holdout = await evaluate(
-            load_checks(Path(__file__).resolve().parents[3] / "docs/knowledge19-holdout.json")
-        )
+        holdout = await evaluate(holdout_checks)
         assert sum(row["expected_section_rank"] is not None for row in original) == 11
         assert all(row["expected_section_rank"] is not None for row in holdout)
         for version_id in versions.values():

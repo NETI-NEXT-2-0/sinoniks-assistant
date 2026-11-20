@@ -20,7 +20,7 @@ account = data.get("account", data)
 ORIGIN = "http://localhost:8080"
 with sync_playwright() as session:
     browser = session.chromium.launch(
-        executable_path=os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium")
+        executable_path=os.environ.get("CHROMIUM_PATH")
     )
     page = browser.new_page(viewport={"width": 1365, "height": 1000})
     errors = []
