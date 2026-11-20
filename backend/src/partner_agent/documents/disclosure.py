@@ -15,7 +15,13 @@ from partner_agent.documents.docling_adapter import (
     approved_context,
     assert_reviewable,
 )
-from partner_agent.documents.edited_copy import EDITED_FORMAT, ReviewedCopy, copy_key, render_copy
+from partner_agent.documents.edited_copy import (
+    EDITED_FORMAT,
+    MARKDOWN_LOCATORS,
+    ReviewedCopy,
+    copy_key,
+    render_copy,
+)
 from partner_agent.documents.limits import MAX_EVIDENCE_CHARS
 from partner_agent.documents.service import lock_document
 from partner_agent.infra.errors import APIError
@@ -288,6 +294,12 @@ async def approve_stored_canonical(
             version_id=version_id,
             canonical_sha256=artifact_hash,
             text=reviewed_text,
+            locator_profile=(
+                MARKDOWN_LOCATORS
+                if isinstance(canonical, CanonicalDocument)
+                and canonical.media_type == "text/markdown"
+                else None
+            ),
         )
         data = edited_copy.model_dump_json().encode()
         copy_digest = hashlib.sha256(data).hexdigest()

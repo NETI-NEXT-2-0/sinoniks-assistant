@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
+from starlette.concurrency import run_in_threadpool
 
 from partner_agent.documents.access import (
     access_predicate,
@@ -25,7 +26,8 @@ from partner_agent.infra.models_documents import (
     DocumentGrant,
     DocumentVersion,
 )
-from partner_agent.retrieval.lexical import matched_terms, query_terms
+from partner_agent.retrieval.lexical import query_terms
+from partner_agent.retrieval.ranking import PROFILE, rank_scores
 
 SCAN_PAGE_SIZE = 1000
 MAX_SCAN_CANDIDATES = 10000
@@ -139,7 +141,7 @@ async def search_knowledge(
         raise APIError(403, "access_revoked", "Access revoked")
     if not query.strip() or len(query.encode()) > 32768 or not 1 <= limit <= 100:
         raise APIError(422, "validation_error", "Invalid query")
-    terms, identifiers = query_terms(query)
+    terms, _ = query_terms(query)
     if not terms:
         return []
     # Access filters run before loading any content. Keyset pages avoid silently
@@ -162,9 +164,6 @@ async def search_knowledge(
         rows = (await db.execute(page_query.limit(page_size + 1))).all()
         page = rows[:page_size]
         for unit, document in page:
-            matches = matched_terms(terms, identifiers, unit.text)
-            if not matches:
-                continue
             hits.append(
                 {
                     "evidence_id": str(unit.id),
@@ -173,8 +172,8 @@ async def search_knowledge(
                     "title": document.title,
                     "excerpt": unit.text,
                     "locator": unit.locator,
-                    "score": len(matches) / len(terms),
-                    "profile": "offline_lexical_only",
+                    "score": 0.0,
+                    "profile": PROFILE,
                     "_policy_revision": unit.policy_revision,
                 }
             )
@@ -184,7 +183,13 @@ async def search_knowledge(
         if scanned >= MAX_SCAN_CANDIDATES:
             raise APIError(503, "search_scope_too_large", "Search scope exceeds the current limit")
         cursor = page[-1][0].id
-    selected = sorted(hits, key=lambda hit: (-hit["score"], hit["evidence_id"]))[:limit]
+    scores = await run_in_threadpool(rank_scores, query, [hit["excerpt"] for hit in hits])
+    for hit, score in zip(hits, scores, strict=True):
+        hit["score"] = score
+    selected = sorted(
+        (hit for hit in hits if hit["score"] > 0),
+        key=lambda hit: (-hit["score"], hit["evidence_id"]),
+    )[:limit]
     # Recheck under document locks after candidate loading; revocations and pointer
     # changes serialize with this final check. Lock in a stable order across searches.
     authorized = {}

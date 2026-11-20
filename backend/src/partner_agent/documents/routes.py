@@ -274,13 +274,14 @@ class SearchBody(BaseModel):
 
 @router.post("/search")
 async def search_documents(body: SearchBody, request: Request, db: DB) -> dict[str, Any]:
+    from partner_agent.retrieval.ranking import PROFILE
     from partner_agent.retrieval.service import MAX_SCAN_CANDIDATES, search_knowledge
 
     await unsafe_session(request, db)
     _, actor = await authenticated(request, db)
     items = await search_knowledge(db, actor, body.query, body.limit)
     await db.commit()
-    return {"items": items, "profile": "offline_lexical_only",
+    return {"items": items, "profile": PROFILE,
             "candidate_limit": MAX_SCAN_CANDIDATES}
 
 

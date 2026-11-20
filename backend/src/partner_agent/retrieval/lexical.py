@@ -184,12 +184,14 @@ def search(
     policies: dict[UUID, ActivePolicy],
     limit: int = 8,
 ) -> tuple[Evidence, ...]:
+    from partner_agent.retrieval.ranking import rank_scores
+
     if not 1 <= limit <= 100 or len(query.encode()) > 32768:
         raise ValueError("invalid_search_bounds")
-    terms, identifiers = query_terms(query)
+    terms, _ = query_terms(query)
     if not terms:
         return ()
-    found = []
+    eligible = []
     for chunk in chunks:
         unit = chunk.unit
         policy = policies.get(unit.document_id)
@@ -202,10 +204,13 @@ def search(
             or user_id in unit.denied_users
         ):
             continue
-        matches = matched_terms(terms, identifiers, chunk.text)
-        if not matches:
+        eligible.append(chunk)
+    scores = rank_scores(query, [chunk.text for chunk in eligible])
+    found = []
+    for chunk, score in zip(eligible, scores, strict=True):
+        if not score:
             continue
-        score = len(matches) / len(terms)
+        unit = chunk.unit
         found.append(
             Evidence(
                 chunk_id=chunk.id,
