@@ -28,7 +28,7 @@ from partner_agent.runtime.runner import execute_run
 
 pytestmark = [pytest.mark.integration, pytest.mark.storage]
 KNOWLEDGE = "/api/v1/knowledge"
-WEB_SOURCE = {"url": "https://partner.example.org/courses/rag-204", "captured_on": "2026-11-17"}
+WEB_SOURCE = {"url": "https://partner.example.org/courses/rag-204", "captured_on": "2026-11-21"}
 WEB_DOCUMENTS = {"course", "venue"}
 
 
@@ -88,7 +88,7 @@ async def check_answer(client, headers, question, source, hits, monkeypatch):
         for item in hits:
             label = " (curator-reviewed text copy)"
             if item.get("web_source"):
-                label += " (page snapshot captured 2026-11-17)"
+                label += " (page snapshot captured 2026-11-21)"
             blocks.append(f"[{item['evidence_id']}]{label} {item['excerpt']}")
         expected = "\n\n".join(blocks)
         assert context == expected, question.id
@@ -170,7 +170,7 @@ async def test_labelled_demo_retrieval_and_document_visibility(plane, monkeypatc
                 assert reused.status_code == 202 and reused.json()["id"] == str(version_id)
                 assert reused.json()["reused"] is True
                 conflict = await owner.post(
-                    upload_path, params={**params, "source_captured_on": "2026-11-16"},
+                    upload_path, params={**params, "source_captured_on": "2026-11-20"},
                     content=original.encode(), headers=upload_headers,
                 )
                 assert conflict.status_code == 409

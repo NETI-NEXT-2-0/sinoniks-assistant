@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
+from xml.etree import ElementTree
 
 import httpx
 from playwright.sync_api import expect, sync_playwright
@@ -10,8 +11,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = ROOT / ".local/ci-private"
 ORIGIN = "http://localhost:8080"
 KNOWLEDGE = "/api/v1/knowledge"
-probe = json.loads((PRIVATE / "probe.json").read_text())
-account = probe["account"]
 saved = PRIVATE / "browser.json"
 
 
@@ -112,6 +111,24 @@ def verify_request_mode_controls(page):
     print("Request mode admission, reload, inherited intent and branch draft verified")
 
 
+def verify_diagram_export(panel, page, data):
+    with page.expect_download() as download:
+        panel.get_by_role("button", name="Скачать схему draw.io", exact=True).click()
+    assert download.value.suggested_filename.endswith(".drawio")
+    diagram = ElementTree.parse(download.value.path()).getroot()
+    cells = diagram.findall("./diagram[@id='topology']/mxGraphModel/root/mxCell")
+    edges = {cell.attrib["id"]: (cell.get("source"), cell.get("target"))
+             for cell in cells if cell.get("edge") == "1"}
+    assert edges == {
+        item["id"]: (item["source"], item["target"]) for item in data["connections"]
+    }
+    vertices = {cell.attrib["id"] for cell in cells if cell.get("vertex") == "1"}
+    assert {node["id"] for node in data["network_nodes"] + data["device_nodes"]} <= vertices
+    expected_rules = {f"rule-{i}" for i in range(1, len(data["rules"]) + 1)}
+    rule_labels = {cell.attrib["id"] for cell in diagram.findall(".//mxCell")} & expected_rules
+    assert len(rule_labels) == data["counts"]["logical_exchanges"]
+
+
 def verify_rehearsal_example(page):
     new_chat = page.locator("button.new-chat")
     new_chat.click()
@@ -159,6 +176,7 @@ def verify_rehearsal_example(page):
     assert data["counts"]["network_slot_pairs"] == 3
     assert data["counts"]["network_node_settings"] == 6
     assert data["counts"]["file_transfer_policies"] == 1
+    verify_diagram_export(panel, page, data)
     close.click()
     open_project.click()
     expect(receiver).to_have_value("Хранилище отчётов")
@@ -262,10 +280,10 @@ def verify_restored_project_context(page, source_message_id):
     print("Restored original run retains its manual project base when regenerated")
 
 
-def verify_moderated_snapshot(page):
+def verify_moderated_snapshot(page, probe):
     code = "BROW-" + uuid4().hex[:8]
     address = "https://partner.example.org/courses/browser"
-    captured_on = "2026-11-17"
+    captured_on = "2026-11-20"
     removed = "review-only@example.test"
     original = f"Course {code}: send questions to {removed} during office hours."
     reviewed = original.replace(removed, "the help desk")
@@ -323,7 +341,7 @@ def verify_moderated_snapshot(page):
         httpx.Client(base_url=ORIGIN, timeout=15, trust_env=False) as owner,
         httpx.Client(base_url=ORIGIN, timeout=15, trust_env=False) as reader,
     ):
-        owner_headers = api_session(owner, account)
+        owner_headers = api_session(owner, probe["account"])
         headers = api_session(reader, probe["reader"])
         assert search(owner, owner_headers) == [], "Draft visible to the curator's search"
         summary_button = page.get_by_role("button", name="Сводка", exact=True)
@@ -382,53 +400,63 @@ def verify_moderated_snapshot(page):
     print("Browser snapshot moderation, publication and answer-only access verified")
 
 
-with sync_playwright() as session:
-    browser = session.chromium.launch()
-    page = browser.new_page(viewport={"width": 1365, "height": 900})
-    errors = []
-    page.on("response", lambda response: print(
-        "Browser HTTP failure", response.status, urlsplit(response.url).path,
-    ) if response.status >= 400 and response.url.startswith(ORIGIN + "/api/v1/") else None)
-    page.on("pageerror", lambda error: errors.append(type(error).__name__))
-    page.goto(ORIGIN)
-    page.get_by_label("Логин", exact=True).fill(account["login"])
-    page.get_by_label("Пароль", exact=True).fill(account["password"])
-    page.get_by_role("button", name="Войти", exact=True).click()
-    expect(page.locator("button.new-chat")).to_be_enabled(timeout=15000)
-    if saved.exists():
-        record = json.loads(saved.read_text())
-        page.goto(record["url"])
-        expect(page.locator(".assistant-message[data-message-id] .prose").filter(
-            has_text="Browser acceptance",
-        )).to_contain_text(
-            "Browser acceptance", timeout=45000
+def main():
+    probe = json.loads((PRIVATE / "probe.json").read_text())
+    account = probe["account"]
+    with sync_playwright() as session:
+        browser = session.chromium.launch()
+        page = browser.new_page(viewport={"width": 1365, "height": 900})
+        errors = []
+        page.on("response", lambda response: print(
+            "Browser HTTP failure", response.status, urlsplit(response.url).path,
+        ) if response.status >= 400 and response.url.startswith(ORIGIN + "/api/v1/") else None)
+        page.on("pageerror", lambda error: errors.append(type(error).__name__))
+        page.goto(ORIGIN)
+        page.get_by_label("Логин", exact=True).fill(account["login"])
+        page.get_by_label("Пароль", exact=True).fill(account["password"])
+        page.get_by_role("button", name="Войти", exact=True).click()
+        expect(page.locator("button.new-chat")).to_be_enabled(timeout=15000)
+        if saved.exists():
+            record = json.loads(saved.read_text())
+            page.goto(record["url"])
+            expect(page.locator(".assistant-message[data-message-id] .prose").filter(
+                has_text="Browser acceptance",
+            )).to_contain_text(
+                "Browser acceptance", timeout=45000
+            )
+            verify_restored_project_context(page, record["project_message_id"])
+            question = "Recovery acceptance"
+        else:
+            verify_rehearsal_example(page)
+            new_chat = page.locator("button.new-chat")
+            new_chat.click()
+            expect(new_chat).to_be_enabled()
+            question = "Browser acceptance"
+        page.get_by_role("textbox", name="Сообщение", exact=True).fill(question)
+        page.get_by_role("button", name="Отправить сообщение", exact=True).click()
+        answer = page.locator(".assistant-message[data-message-id] .prose").filter(
+            has_text=question,
         )
-        verify_restored_project_context(page, record["project_message_id"])
-        question = "Recovery acceptance"
-    else:
-        verify_rehearsal_example(page)
-        new_chat = page.locator("button.new-chat")
-        new_chat.click()
-        expect(new_chat).to_be_enabled()
-        question = "Browser acceptance"
-    page.get_by_role("textbox", name="Сообщение", exact=True).fill(question)
-    page.get_by_role("button", name="Отправить сообщение", exact=True).click()
-    answer = page.locator(".assistant-message[data-message-id] .prose").filter(has_text=question)
-    expect(answer).to_contain_text(question, timeout=45000)
-    chat_url = page.url
-    page.reload()
-    expect(answer).to_contain_text(question, timeout=15000)
-    if question == "Browser acceptance":
-        verify_live_profile_presentation(page)
-        verify_request_mode_controls(page)
-        verify_saved_design(page)
-        source_message_id = verify_design_branch_base(page)
-        verify_moderated_snapshot(page)
-    assert not errors, "Browser execution errors"
-    saved.write_text(json.dumps({
-        "url": chat_url, "project_message_id": (
-            source_message_id if question == "Browser acceptance" else record["project_message_id"]
-        ),
-    }), encoding="utf-8")
-    browser.close()
-print("Browser login, completion and reload verified")
+        expect(answer).to_contain_text(question, timeout=45000)
+        chat_url = page.url
+        page.reload()
+        expect(answer).to_contain_text(question, timeout=15000)
+        if question == "Browser acceptance":
+            verify_live_profile_presentation(page)
+            verify_request_mode_controls(page)
+            verify_saved_design(page)
+            source_message_id = verify_design_branch_base(page)
+            verify_moderated_snapshot(page, probe)
+        assert not errors, "Browser execution errors"
+        saved.write_text(json.dumps({
+            "url": chat_url, "project_message_id": (
+                source_message_id if question == "Browser acceptance"
+                else record["project_message_id"]
+            ),
+        }), encoding="utf-8")
+        browser.close()
+    print("Browser login, completion and reload verified")
+
+
+if __name__ == "__main__":
+    main()

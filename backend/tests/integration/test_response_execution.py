@@ -304,12 +304,12 @@ async def test_model_limit_and_rejected_usage(corpus, monkeypatch, scenario, cap
     get_settings.cache_clear()
     usage = {"prompt_tokens": 1000, "completion_tokens": 10000 if scenario == "actual" else 500}
     calls = 0
-    before_midnight = datetime(2026, 11, 16, 23, 59, 59, tzinfo=UTC)
+    before_midnight = datetime(2026, 11, 20, 23, 59, 59, tzinfo=UTC)
 
     class LedgerClock:
         @staticmethod
         def now(tz):
-            at = datetime(2026, 11, 17, tzinfo=UTC) if calls else before_midnight
+            at = datetime(2026, 11, 21, tzinfo=UTC) if calls else before_midnight
             return at.astimezone(tz)
 
     if scenario == "midnight":

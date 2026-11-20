@@ -32,9 +32,9 @@ def test_snapshot_bundle_keeps_provenance_and_deduplicates_prepared_content(tmp_
     pdf = b"%PDF-1.7\n%%EOF\n"
     (tmp_path / "catalog.pdf").write_bytes(pdf)
     rows = [
-        ("Курс, общий", "Программы", "https://EXAMPLE.org/course", "2026-11-17", "страница.html"),
-        ("Зеркало", "Программы", "https://example.org/mirror", "2026-11-17", "duplicate.txt"),
-        ("Каталог", "Документы", "https://example.org/catalog", "2026-11-16", "catalog.pdf"),
+        ("Курс, общий", "Программы", "https://EXAMPLE.org/course", "2026-11-21", "страница.html"),
+        ("Зеркало", "Программы", "https://example.org/mirror", "2026-11-21", "duplicate.txt"),
+        ("Каталог", "Документы", "https://example.org/catalog", "2026-11-20", "catalog.pdf"),
     ]
     process = run_snapshot_batch(tmp_path, rows)
     assert process.returncode == 0, process.stderr
@@ -44,7 +44,7 @@ def test_snapshot_bundle_keeps_provenance_and_deduplicates_prepared_content(tmp_
     assert inventory["snapshots_by_topic"] == {"Программы": 2, "Документы": 1}
     course, mirror, catalog = inventory["snapshots"]
     assert course["url"] == "https://example.org/course"
-    assert course["title"] == "Курс, общий" and course["captured_on"] == "2026-11-17"
+    assert course["title"] == "Курс, общий" and course["captured_on"] == "2026-11-21"
     assert course["input_sha256"] == hashlib.sha256(page.encode()).hexdigest()
     assert course["snapshot_sha256"] == hashlib.sha256(snapshot).hexdigest()
     assert mirror["file"] == course["file"] and mirror["duplicate_content"] is True
@@ -57,16 +57,16 @@ def test_snapshot_bundle_keeps_provenance_and_deduplicates_prepared_content(tmp_
 
 
 @pytest.mark.parametrize(("url", "captured_on", "filename", "error"), [
-    ("https://example.org/course", "2026-11-17", "course.txt", "only once"),
-    ("https://example.org/other", "2026-11-17", "../course.txt", "relative"),
-    ("https://127.0.0.1/other", "2026-11-17", "course.txt", "invalid_source_url"),
-    ("https://example.org/other", "20261117", "course.txt", "YYYY-MM-DD"),
-    ("https://example.org/other", "2026-11-18", "missing.txt", "Expected a local file"),
+    ("https://example.org/course", "2026-11-21", "course.txt", "only once"),
+    ("https://example.org/other", "2026-11-21", "../course.txt", "relative"),
+    ("https://127.0.0.1/other", "2026-11-21", "course.txt", "invalid_source_url"),
+    ("https://example.org/other", "20261121", "course.txt", "YYYY-MM-DD"),
+    ("https://example.org/other", "2026-11-22", "missing.txt", "Expected a local file"),
 ])
 def test_invalid_batch_leaves_no_output(tmp_path, url, captured_on, filename, error):
     (tmp_path / "course.txt").write_text("Local snapshot", encoding="utf-8")
     process = run_snapshot_batch(tmp_path, [
-        ("First", "Courses", "https://example.org/course", "2026-11-17", "course.txt"),
+        ("First", "Courses", "https://example.org/course", "2026-11-21", "course.txt"),
         ("Second", "Courses", url, captured_on, filename),
     ])
     assert process.returncode == 2 and "Snapshot 2: " in process.stderr and error in process.stderr
@@ -116,34 +116,23 @@ def test_stack_resolves_repository_and_keeps_local_services_out_of_ci(tmp_path, 
     assert calls[-1] == ("config", "--quiet")
 
 
-@pytest.mark.parametrize(
-    "event,ref,base,full,stack,release",
-    [
-        ("push", "refs/heads/feature/sample", "", "", False, False),
-        ("push", "refs/heads/develop", "", "", True, False),
-        ("push", "refs/heads/main", "", "", True, True),
-        ("pull_request", "refs/pull/1/merge", "main", "", True, True),
-        ("pull_request", "refs/pull/1/merge", "develop", "", True, False),
-        ("workflow_dispatch", "refs/heads/develop", "", "true", True, True),
-    ],
-)
-def test_acceptance_scope_matches_integration_and_release_events(
-    tmp_path, event, ref, base, full, stack, release
-):
-    output = tmp_path / "scope"
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    environment = {
-        **os.environ,
-        "BASE_SHA": head,
-        "BASE_BRANCH": base,
-        "FULL_CHECKS": full,
-        "GITHUB_EVENT_NAME": event,
-        "GITHUB_REF": ref,
-        "GITHUB_OUTPUT": str(output),
-    }
-    subprocess.run([sys.executable, "scripts/ci/scope.py"], cwd=ROOT, env=environment, check=True)
-    assert output.read_text() == f"stack={str(stack).lower()}\nfull={str(release).lower()}\n"
-
+def test_develop_pull_request_runs_full_checks_once_without_publishing():
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    assert set(workflow["on"]) == {"pull_request", "workflow_dispatch"}
+    pull_request = workflow["on"]["pull_request"]
+    assert pull_request["branches"] == ["develop"]
+    assert set(pull_request["types"]) == {"opened", "synchronize", "reopened"}
+    assert workflow["permissions"] == {"contents": "read"}
+    jobs = workflow["jobs"]
+    assert set(jobs) == {"quality", "postgres", "security", "containers", "required"}
+    assert set(jobs["required"]["needs"]) == set(jobs) - {"required"}
+    acceptance_steps = {step.get("name") for step in jobs["containers"]["steps"]}
+    assert {
+        "Browser acceptance", "Recovery acceptance", "Isolated conversion acceptance",
+    } <= acceptance_steps
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Linux container launcher")
 @pytest.mark.parametrize("available", [1, 2, 8])

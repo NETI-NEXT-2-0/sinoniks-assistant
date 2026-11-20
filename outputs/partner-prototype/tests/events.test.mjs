@@ -15,7 +15,7 @@ const { SseFrames, subscribeChat } = await import(`data:text/javascript;base64,$
 const encoder = new TextEncoder();
 
 function event(seq, type = 'message.delta', payload = { text: 'Проверка 🙂' }) {
-  return `id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({ v: 1, chat_id: 'chat', branch_id: 'branch', run_id: 'run', seq, at: '2026-11-13T00:00:00Z', payload })}\n\n`;
+  return `id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({ v: 1, chat_id: 'chat', branch_id: 'branch', run_id: 'run', seq, at: '2026-11-20T07:01:00Z', payload })}\n\n`;
 }
 function response(text) {
   return new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(text)); } }), {
