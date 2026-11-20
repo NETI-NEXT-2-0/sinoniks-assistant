@@ -150,13 +150,17 @@ export function useWorkspace(auth: AuthClient, onExpired: () => void) {
     };
   }, []);
 
-  async function create(): Promise<void> {
+  async function create(initialDraft = ''): Promise<void> {
     if (acting) return;
     setActing(true); setError(null);
     try {
       const value = await api.create();
       if (!live.current) return;
       setChats((old) => [value, ...old.filter((row) => row.id !== value.id)]);
+      if (initialDraft) {
+        const key = `${value.id}:${value.default_branch_id}`;
+        setDrafts((old) => ({ ...old, [key]: old[key] ?? initialDraft }));
+      }
       await selectChat(value.id);
     } catch (failure) { handleError(failure); if (failure instanceof ApiError && failure.status === 0) void refreshListRef.current(); }
     finally { if (live.current) setActing(false); }

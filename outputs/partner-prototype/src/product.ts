@@ -4,6 +4,6 @@ export const product = Object.freeze({
   partnerName: 'АйТи Бастион',
   description: 'Помощник инженера по Синониксу',
   disclaimer: 'Проектные решения требуют проверки инженером',
-  logoLight: '',
-  logoDark: '',
+  logoLight: '/brand/it-bastion-white.svg',
+  logoDark: '/brand/it-bastion-white.svg',
 });

@@ -5,7 +5,7 @@ type Summary = { calls_count: number; models: string[]; input_tokens: number | n
   input_cost_usd: string | null; output_cost_usd: string | null; estimated_cost_usd: string | null;
   provider_cost_usd: string | null; known_recorded_cost_usd: string; unknown_cost_calls: number };
 type Ledger = { session_id: string; summary: Summary; accounting_complete: boolean; tariff_declaration_complete: boolean;
-  legacy_untracked_turns: number; mean_elapsed_ms: number | null; timing_complete: boolean;
+  legacy_untracked_turns: number; mean_full_elapsed_ms: number | null; mean_elapsed_ms: number | null; timing_complete: boolean;
   by_model: (Summary & { model_id: string })[];
   calls: { model_id: string; status: string; estimated_cost_usd: string | null }[] };
 
@@ -66,7 +66,7 @@ export function AccountingPanel({ auth, chatId, revision, onExpired }: {
         <div><dt>Оценка: вход / выход</dt><dd>{money(totals.input_cost_usd)} / {money(totals.output_cost_usd)}</dd></div>
         <div><dt>Всего по снимку тарифов</dt><dd>{money(totals.estimated_cost_usd)}</dd></div>
         {totals.provider_cost_usd !== null && <div><dt>Списание по данным API</dt><dd>{money(totals.provider_cost_usd)}</dd></div>}
-        <div><dt>Среднее время до ответа и карточки</dt><dd>{data.mean_elapsed_ms === null ? 'замер неполный' : `${(data.mean_elapsed_ms / 1000).toFixed(2)} с`}</dd></div></dl>
+        <div><dt>Среднее время до полного результата</dt><dd>{data.mean_full_elapsed_ms === null ? 'полный замер неизвестен' : `${(data.mean_full_elapsed_ms / 1000).toFixed(2)} с`}</dd></div></dl>
       {!data.accounting_complete && <p>Учёт неполный: неизвестные расходы не считаются нулём. Известная часть: {money(totals.known_recorded_cost_usd)}. Старых шагов без журнала: {data.legacy_untracked_turns}.</p>}
       {!data.tariff_declaration_complete && <p>Конкурсный маршрут и снимок тарифов ещё не объявлены полностью.</p>}
       {totals.models.length > 0 && <p>Модели: {totals.models.join(', ')}</p>}

@@ -1,1 +1,4 @@
 *.sh text eol=lf
+
+# Preserve the supplied official SVG bytes on Windows and Linux.
+outputs/partner-prototype/public/brand/it-bastion-white.svg -text

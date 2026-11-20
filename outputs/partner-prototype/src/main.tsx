@@ -9,6 +9,8 @@ import { mountVideoBackdrop } from './scene';
 import './style.css';
 import './themes.css';
 import './auth.css';
+import { EntryPage } from './entry/EntryPage';
+import './entry/entry.css';
 
 const themes = [
   { id: 'standard', name: 'Стандартная', caption: 'Чистый фон. Чёткий фокус.' },
@@ -45,10 +47,10 @@ function Login({ notice, onLogin }: { notice?: string; onLogin: (user: User) => 
       setPassword(''); setError(failure);
     } finally { setPending(false); }
   }
-  return <section className="auth-card" aria-labelledby="login-title" aria-busy={pending}>
+  return <EntryPage><section className="auth-card" aria-labelledby="login-title" aria-busy={pending}>
     <span className="auth-mark" aria-hidden="true"><Icon name="message" /></span>
-    <span className="auth-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</span>
-    <h1 id="login-title">Вход в {product.name}</h1>
+    <span className="auth-eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span>
+    <h2 id="login-title" tabIndex={-1}>Войдите в команду</h2>
     <p className="auth-description">Используйте учётную запись вашей команды.</p>
     {notice && !error && <p className="auth-notice" role="status">{notice}</p>}
     <form className="login-form" aria-label="Вход" onSubmit={(event) => { void submit(event); }}>
@@ -60,7 +62,7 @@ function Login({ notice, onLogin }: { notice?: string; onLogin: (user: User) => 
       <button className="login-submit" type="submit" disabled={pending}>{pending ? 'Входим…' : 'Войти'}<Icon name="arrow" /></button>
     </form>
     <p className="account-help">Если у вас нет доступа, обратитесь к администратору команды.</p>
-  </section>;
+  </section></EntryPage>;
 }
 
 function Appearance({ theme, selectTheme, close }: { theme: Theme; selectTheme: (theme: Theme) => void; close: () => void }) {
@@ -213,7 +215,7 @@ function App() {
       sessionError={sessionError} onExpired={() => {
         ++epoch.current; auth.reset(); setMenu(false); setSessionError(null);
         setSession({ kind: 'signed-out', notice: 'Сессия истекла. Войдите снова.' });
-      }} /> : <div className={`layout auth-layout ${menu ? 'menu-open' : ''}`}>
+      }} /> : <div className={`layout auth-layout public-entry ${menu ? 'menu-open' : ''}`}>
       <aside className="sidebar" aria-label="Панель чатов" inert={appearance || (mobile && !menu) || undefined} aria-hidden={mobile && !menu || undefined} onKeyDown={(event) => {
         if (!mobile || !menu || event.key !== 'Tab') return;
         const controls = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
@@ -230,7 +232,7 @@ function App() {
       </aside>
       <button className="scrim" aria-label="Закрыть меню" onClick={() => setMenu(false)} tabIndex={menu ? 0 : -1} />
       <main className="main" inert={appearance || (mobile && menu) || undefined}>
-        <header className="header"><div className="header-left"><button ref={menuTrigger} className="menu-button icon-button" aria-label="Показать список чатов" aria-expanded={menu} onClick={() => setMenu(true)}><Icon name="panel" /></button><span className="model-button">{product.name}</span><span className="header-divider" /><span className="chat-title">Вход</span></div><div className="header-right"><button className="appearance-button" aria-label="Настройки оформления" onClick={() => setAppearance(true)}><Icon name="sun" /><span>Оформление</span></button></div></header>
+        <header className="header"><div className="header-left"><Brand /><span className="entry-header-caption">Ассистент инженера</span></div><div className="header-right"><button className="appearance-button" aria-label="Настройки оформления" onClick={() => setAppearance(true)}><Icon name="sun" /><span>Оформление</span></button></div></header>
         <div className="conversation auth-conversation">
           {session.kind === 'loading' && <section className="auth-card loading-card" role="status"><span className="auth-spinner" aria-hidden="true" /><h1>Проверяем сессию…</h1><p className="auth-description">Подключаемся к рабочему пространству.</p></section>}
           {session.kind === 'unavailable' && <section className="auth-card unavailable-card"><span className="auth-mark" aria-hidden="true"><Icon name="message" /></span><h1>Не удалось подключиться</h1><ErrorNotice error={session.error} action="session" /><button className="login-submit" onClick={() => { void initialize(); }}>Повторить подключение<Icon name="arrow" /></button></section>}

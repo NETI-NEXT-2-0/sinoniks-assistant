@@ -43,3 +43,22 @@
 .session-accounting dl > div { display: flex; flex-wrap: wrap; gap: 6px 16px; justify-content: space-between; }
 .session-accounting dd { margin: 0; font-variant-numeric: tabular-nums; }
 .session-accounting button { margin: 3px 8px 3px 0; padding: 5px 8px; }
+.design-example {
+  max-width: 32rem;
+  margin: 1rem auto 0;
+  padding: 0.875rem 1rem;
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  text-align: left;
+}
+.design-example p { font-size: 0.875rem; line-height: 1.55; }
+.design-example button {
+  margin-top: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+}
+.design-example button:disabled { opacity: 0.55; }
