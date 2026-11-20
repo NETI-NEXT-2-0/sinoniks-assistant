@@ -23,4 +23,4 @@ async def provision_checkpoints() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(provision_checkpoints())
+    asyncio.run(provision_checkpoints(), loop_factory=asyncio.SelectorEventLoop)

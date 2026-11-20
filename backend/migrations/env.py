@@ -44,4 +44,4 @@ async def online() -> None:
 if context.is_offline_mode():
     offline()
 else:
-    asyncio.run(online())
+    asyncio.run(online(), loop_factory=asyncio.SelectorEventLoop)

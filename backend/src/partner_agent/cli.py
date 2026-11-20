@@ -78,7 +78,9 @@ def main() -> None:
     if password != confirmation:
         parser.error("Passwords do not match")
     try:
-        asyncio.run(execute(args.command, login, password))
+        asyncio.run(
+            execute(args.command, login, password), loop_factory=asyncio.SelectorEventLoop
+        )
     except ValueError as exc:
         parser.error(str(exc))
     except SQLAlchemyError:
