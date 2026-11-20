@@ -1,20 +1,42 @@
 # Синоникс Ассистент
 
-## Проверка платформы
+Чат уточняет описание двух контуров, рассчитывает правила обмена,
+сохраняет ревизии проекта и выгружает JSON и редактируемую схему draw.io.
+Для справочных ответов система ищет фрагменты, доступные пользователю.
 
-Требуются Python 3.12, uv и Docker Compose. Выполните из корня репозитория.
+## Локальная разработка
 
-```sh
+Нужны Python 3.12, uv, Node.js 22 и PostgreSQL 17. Задайте
+`PARTNER_DATABASE_URL` с адресом своей БД в формате
+`postgresql+psycopg://` и ролью, которая имеет право создавать объекты в этой
+БД. Для локальной проверки задайте `PARTNER_PUBLIC_ORIGIN=http://localhost:8080`
+и `PARTNER_RUNTIME_PROFILE=offline_fixture`.
+
+```powershell
 uv sync --project backend --locked --group dev
-uv run --project backend --no-sync python scripts/bootstrap-env.py
-docker compose --profile "*" config --quiet
-docker compose up -d --wait postgres
-docker compose run --build --rm --no-deps migrate
-docker compose run --build --rm --no-deps migrate alembic current
-docker compose run --build --rm --no-deps provision-checkpoints
-uv run --project backend --no-sync pytest -q backend/tests
+npm ci --ignore-scripts --prefix outputs/partner-prototype
+uv run --project backend --no-sync alembic -c backend/alembic.ini upgrade head
+uv run --project backend --no-sync python -m partner_agent.infra.provision
+uv run --project backend --no-sync partner-admin first-admin
+uv run --project backend --no-sync python -c "import asyncio, uvicorn; server = uvicorn.Server(uvicorn.Config('partner_agent.main:app', host='127.0.0.1', port=8080)); asyncio.run(server.serve(), loop_factory=asyncio.SelectorEventLoop)"
 ```
 
-Команда подготовки создаёт `.env` и `infra/local/garage.toml` с локальными
-учётными данными. API, обработчики запросов, конвертер и клиент будут
-доступны после подключения соответствующих модулей.
+Во втором терминале запустите клиент и откройте `http://127.0.0.1:5173`.
+
+```powershell
+npm run dev --prefix outputs/partner-prototype
+```
+
+Для обработки запросов нужен Hatchet с локальным токеном. Для загрузки и
+индексации документов нужны Garage и Qdrant, для конвертации нужен
+изолированный Linux-координатор. Compose использует отдельные локальные
+учётные данные из `.env` и конфигурацию Garage из `infra/local/garage.toml`.
+Для чистой рабочей копии их создаёт команда ниже. Проверка конфигурации
+требует Docker Compose.
+
+```powershell
+uv run --project backend --no-sync python scripts/bootstrap-env.py
+docker compose --profile "*" config --quiet
+npm test --prefix outputs/partner-prototype
+npm run build --prefix outputs/partner-prototype
+```
