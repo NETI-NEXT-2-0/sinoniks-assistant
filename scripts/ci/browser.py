@@ -430,7 +430,9 @@ def main():
         expect(page.locator("button.new-chat")).to_be_enabled(timeout=15000)
         if saved.exists():
             record = json.loads(saved.read_text())
-            page.goto(record["url"])
+            chat_title = record["chat_title"]
+            page.get_by_role("button", name=chat_title, exact=True).click()
+            expect(page.locator(".chat-title")).to_have_text(chat_title)
             expect(page.locator(".assistant-message[data-message-id] .prose").filter(
                 has_text="Browser acceptance",
             )).to_contain_text(
@@ -444,13 +446,18 @@ def main():
             new_chat.click()
             expect(new_chat).to_be_enabled()
             question = "Browser acceptance"
+            chat_title = f"{question} {uuid4().hex[:8]}"
+            page.get_by_role("button", name="Переименовать чат", exact=True).click()
+            dialog = page.get_by_role("dialog", name="Переименовать чат")
+            dialog.get_by_label("Название чата").fill(chat_title)
+            dialog.get_by_role("button", name="Сохранить", exact=True).click()
+            expect(page.locator(".chat-title")).to_have_text(chat_title)
         page.get_by_role("textbox", name="Сообщение", exact=True).fill(question)
         page.get_by_role("button", name="Отправить сообщение", exact=True).click()
         answer = page.locator(".assistant-message[data-message-id] .prose").filter(
             has_text=question,
         )
         expect(answer).to_contain_text(question, timeout=45000)
-        chat_url = page.url
         page.reload()
         expect(answer).to_contain_text(question, timeout=15000)
         if question == "Browser acceptance":
@@ -461,7 +468,7 @@ def main():
             verify_moderated_snapshot(page, probe)
         assert not errors, "Browser execution errors"
         saved.write_text(json.dumps({
-            "url": chat_url, "project_message_id": (
+            "chat_title": chat_title, "project_message_id": (
                 source_message_id if question == "Browser acceptance"
                 else record["project_message_id"]
             ),
