@@ -1,0 +1,6 @@
+Background footage: "Seamless loop of abstract black liquid motion creating a luxurious background."
+Source page: https://www.pexels.com/video/abstract-black-liquid-motion-background-29848606/
+License: Pexels License, https://www.pexels.com/license/
+Retrieved 2026-11-07 for use within the Partner chat design prototype.
+Adaptations: resized to 1280x720, frame rate reduced to 20 fps, H.264 compressed, audio omitted. Original loop duration retained.
+This is integrated background footage, not a standalone stock offering.
