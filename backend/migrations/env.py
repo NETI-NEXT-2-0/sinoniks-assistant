@@ -5,6 +5,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from partner_agent.infra import (
+    models_accounting,  # noqa: F401 -- register per-call accounting
     models_chat_files,  # noqa: F401 -- register private chat files
     models_designs,  # noqa: F401 -- register project revisions
     models_documents,  # noqa: F401 -- register document metadata

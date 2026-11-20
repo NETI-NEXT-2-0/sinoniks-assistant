@@ -32,10 +32,15 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = 45.0
     model_max_output_tokens: int = Field(default=3000, ge=128, le=12000)
     model_wire_api: Literal["chat_completions", "responses"] = "chat_completions"
-    model_input_usd_per_million: float = 0.0
-    model_output_usd_per_million: float = 0.0
-    model_request_cap_usd: float = 0.0
-    model_daily_cap_usd: float = 0.0
+    model_input_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    model_output_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    model_request_cap_usd: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    model_daily_cap_usd: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    model_pricing_declared: bool = False
+    model_contest_mode: bool = False
+    model_catalog_id: str = Field(default="", max_length=200)
+    model_provider_variant: str = Field(default="", max_length=200)
+    model_price_snapshot: str = Field(default="", max_length=200)
     searxng_url: str = ""
     web_official_domains: str = ""
     runtime_automatic_takeover: bool = False
@@ -99,6 +104,16 @@ class Settings(BaseSettings):
                 raise ValueError("openai-compatible profile requires model endpoint")
             if not self.model_name or not self.model_api_key.get_secret_value():
                 raise ValueError("openai-compatible profile requires model name and API key")
+        if self.model_contest_mode and (
+            self.runtime_profile != "openai_compatible"
+            or not (self.model_pricing_declared or self.model_input_usd_per_million
+                    or self.model_output_usd_per_million)
+            or self.model_input_usd_per_million > 0.10
+            or not all(value.strip() for value in (
+                self.model_catalog_id, self.model_provider_variant, self.model_price_snapshot,
+            ))
+        ):
+            raise ValueError("contest mode requires an eligible declared model tariff and route")
         return self
 
     @property
