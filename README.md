@@ -1,0 +1,1 @@
+# sinoniks-assistant
