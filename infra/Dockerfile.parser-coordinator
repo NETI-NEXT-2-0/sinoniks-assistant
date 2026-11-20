@@ -1,0 +1,8 @@
+FROM docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS cli
+FROM partner-agent-api:stage1
+USER root
+COPY --from=cli /usr/local/bin/docker /usr/local/bin/docker
+ENV PYTHONPATH=/repo/backend/src TMPDIR=/parser-work PARTNER_PARSER_WORK_ROOT=/parser-work PARTNER_PARSER_LOCK_PATH=/parser-work/partner-agent-parser.lock
+WORKDIR /repo
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "partner_agent.documents.parser_host"]
+CMD ["--watch", "--interval", "2"]

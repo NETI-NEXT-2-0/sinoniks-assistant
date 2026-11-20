@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "partner-agent"
+version = "0.1.0"
+description = "Partner-Agent modular monolith"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1",
+  "sqlalchemy[asyncio]>=2.1,<2.2", "psycopg[binary]>=3.2,<4",
+  "alembic>=1.14,<2", "pydantic-settings>=2.7,<3", "pwdlib[argon2]>=0.2,<1",
+  "boto3>=1.35,<2", "httpx>=0.28,<1",
+  "langgraph>=1,<2", "langgraph-checkpoint-postgres>=3,<4", "psycopg-pool>=3.2,<4",
+  "hatchet-sdk==1.43.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1", "mypy>=1.15,<2", "boto3-stubs[s3]>=1.35,<2"]
+
+[project.scripts]
+partner-admin = "partner_agent.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+  "integration: requires local disposable PostgreSQL or Garage",
+  "storage: requires Garage or Qdrant",
+  "parser: requires the isolated document converter",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["partner_agent"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["partner_agent"]
