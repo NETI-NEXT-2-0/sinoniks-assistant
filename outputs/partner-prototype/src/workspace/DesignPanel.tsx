@@ -1,9 +1,11 @@
+import { projectSourceError } from "./projectErrors";
+import { DiagramViewer } from './DiagramViewer';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiError, type AuthClient } from '../api/client';
-import { getDesign, latestDesign, saveDesign, type DesignCommand, type DesignInput, type DesignRevision, type ExchangeInput } from '../api/designs';
+import { getDesign, latestDesign, networkProtocols, saveDesign, type DesignCommand, type DesignInput, type DesignRevision, type ExchangeInput } from '../api/designs';
 import './design.css';
 
-interface Props { auth: AuthClient; chatId: string; branchId: string; revisionId?: string | null; close: () => void; onExpired: () => void }
+interface Props { auth: AuthClient; chatId: string; branchId: string; revisionId?: string | null; close: () => void; onExpired: () => void; initial?: DesignRevision | null; latestId?: string | null; onReload?: () => void; requirementsAction?: (id: string | null) => void; upgrading?: boolean; upgradeError?: string }
 const empty: DesignInput = { schema_version: 2, network_a: null, network_b: null, firewall: null, exchanges: [] };
 const modes = { transport: 'Сетевая сессия с ответными данными', diode: 'Односторонние данные', filetransfer: 'Передача файлов' };
 
@@ -34,6 +36,8 @@ function rehearsalExample(): DesignInput {
 }
 
 function failureText(error: unknown): string {
+  const sourceError = projectSourceError(error);
+  if (sourceError) return sourceError;
   if (error instanceof ApiError) {
     if (error.code === 'design_revision_conflict') return 'Проект уже изменён в другом окне. Обновите сохранённую версию.';
     if (error.status === 422) return 'Проверьте поля. Порт должен быть целым числом от 1 до 65535, названия — до 120 символов.';
@@ -42,7 +46,7 @@ function failureText(error: unknown): string {
   return 'Сохранение не подтверждено. Повторите тот же запрос.';
 }
 
-export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpired }: Props) {
+export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpired, initial, latestId, onReload, requirementsAction, upgrading, upgradeError }: Props) {
   const panel = useRef<HTMLElement>(null);
   const pending = useRef<{ body: DesignCommand; key: string } | null>(null);
   const [input, setInput] = useState<DesignInput>(empty);
@@ -63,13 +67,13 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
   useEffect(() => {
     let live = true;
     setBusy(true);
-    void latestDesign(auth, chatId, branchId).then(async (latest) => {
-      const revision = revisionId && reload === 0 && revisionId !== latest?.id
+    void (initial !== undefined ? Promise.resolve(initial) : latestDesign(auth, chatId, branchId)).then(async (latest) => {
+      const revision = initial !== undefined ? initial : revisionId && reload === 0 && revisionId !== latest?.id
         ? await getDesign(auth, chatId, revisionId) : latest;
       if (!live) return;
       setSaved(revision); setInput(revision?.input ?? empty); setDirty(false);
       setLoaded(true);
-      setHistorical(revision?.id !== latest?.id);
+      setHistorical(initial !== undefined ? revision?.id !== (latestId ?? undefined) : revision?.id !== latest?.id);
       pending.current = null; setUncertain(false); setError('');
     }).catch((failure: unknown) => {
       if (!live) return;
@@ -77,7 +81,7 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
       else setError(failureText(failure));
     }).finally(() => { if (live) setBusy(false); });
     return () => { live = false; };
-  }, [auth, chatId, branchId, onExpired, reload, revisionId]);
+  }, [auth, chatId, branchId, onExpired, reload, revisionId, initial, latestId]);
 
   function change(next: DesignInput): void { setInput(next); setDirty(true); setError(''); }
   function changeFlow(index: number, patch: Partial<ExchangeInput>): void {
@@ -111,7 +115,7 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 401) onExpired();
-      else setError('Не удалось скачать сохранённый файл. Повторите попытку.');
+      else setError(projectSourceError(failure) ?? 'Не удалось скачать сохранённый файл. Повторите попытку.');
     } finally { setBusy(false); }
   }
   async function previous(): Promise<void> {
@@ -127,8 +131,6 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
   }
   const disabled = busy || uncertain || !loaded || historical;
   const result = saved?.result;
-  const names = new Map([...(result?.network_nodes ?? []), ...(result?.device_nodes ?? [])].map((node) => [node.id, node.name]));
-  const path = result?.connections.length ? [result.connections[0].source, ...result.connections.map((edge) => edge.target)] : [];
 
   return <div className="design-overlay"><section ref={panel} className="design-panel" role="dialog" aria-modal="true" aria-labelledby="design-title" tabIndex={-1} onKeyDown={(event) => {
     if (event.key === 'Escape' && !busy) close();
@@ -141,8 +143,11 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
   }}>
     <header className="design-header"><div><h2 id="design-title">Проект Синоникса</h2><p>Условия и расчёты сохраняются в текущей ветке чата.</p></div><button disabled={busy} onClick={close}>К чату</button></header>
     <div className="design-content">
+      {upgradeError && <p role="alert" className="design-error">{upgradeError}</p>}
+      {requirementsAction && !historical && <section className="design-result"><h3>Требования Синоникса 1.9</h3><p>Отдельно задаются доверие сетей, USB, файловые проверки и PULL/PUSH. Прежняя схема сохранится в архиве. Новая версия пока собирает требования без расчёта архитектуры.</p><button type="button" disabled={busy || dirty || uncertain || upgrading} onClick={() => requirementsAction(saved?.id ?? null)}>{upgrading ? 'Сохраняем переход…' : saved ? 'Перейти к требованиям 1.9' : 'Начать проект 1.9'}</button></section>}
+
       {error && <div role="alert" className="design-error">{error}<button disabled={busy} onClick={() => {
-        if (!dirty || window.confirm('Загрузить сохранённую версию и заменить текущие правки?')) setReload((value) => value + 1);
+        if (!dirty || window.confirm('Загрузить сохранённую версию и заменить текущие правки?')) (onReload ? onReload() : setReload((value) => value + 1));
       }}>Обновить сохранённую версию</button></div>}
       <form onSubmit={(event) => { void submit(event); }}>
         {!disabled && !saved && !dirty && <div className="design-actions">
@@ -162,13 +167,16 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
             </select></label>
             <label>Отправитель<input maxLength={120} value={flow.sender ?? ''} onChange={(event) => changeFlow(index, { sender: event.target.value || null })} /></label>
             <label>Получатель<input maxLength={120} value={flow.receiver ?? ''} onChange={(event) => changeFlow(index, { receiver: event.target.value || null })} /></label>
-            <label>Режим<select value={flow.mode ?? ''} onChange={(event) => changeFlow(index, { mode: (event.target.value || null) as ExchangeInput['mode'], protocol: null, destination_port: null })}>
+            <label>Режим<select value={flow.mode ?? ''} onChange={(event) => {
+              const mode = (event.target.value || null) as ExchangeInput['mode'];
+              changeFlow(index, mode === 'filetransfer' ? { mode, protocol: null, destination_port: null } : { mode });
+            }}>
               <option value="">Уточнить</option>{Object.entries(modes).map(([mode, label]) => <option key={mode} value={mode}>{label}</option>)}
             </select></label>
             <label>Сервис или категория файлов<input maxLength={120} value={flow.service ?? ''} onChange={(event) => changeFlow(index, { service: event.target.value || null })} /></label>
             <label>Ограничения обмена<input maxLength={120} value={flow.policy ?? ''} onChange={(event) => changeFlow(index, { policy: event.target.value || null })} /></label>
             {flow.mode !== 'filetransfer' && <><label>Протокол<select value={flow.protocol ?? ''} onChange={(event) => changeFlow(index, { protocol: (event.target.value || null) as ExchangeInput['protocol'] })}>
-              <option value="">Уточнить</option><option>TCP</option><option>UDP</option>
+              <option value="">Уточнить</option>{networkProtocols.map(protocol => <option key={protocol}>{protocol}</option>)}
             </select></label><label>Порт получателя<input type="number" min={1} max={65535} step={1} value={flow.destination_port ?? ''} onChange={(event) => changeFlow(index, { destination_port: event.target.value ? Number(event.target.value) : null })} /></label></>}
           </div><button type="button" onClick={() => change({ ...input, exchanges: input.exchanges.filter((_, position) => position !== index) })}>Удалить обмен {index + 1}</button>
         </fieldset>)}
@@ -178,10 +186,10 @@ export function DesignPanel({ auth, chatId, branchId, revisionId, close, onExpir
       </form>
       {saved && <section className="design-result" aria-labelledby="design-result-title"><h3 id="design-result-title">Сохранённая версия {saved.revision}</h3>
         {saved.branch_id !== branchId && <p role="status">Исходная версия унаследована из предыдущей ветки. Изменения сохранятся в текущей ветке.</p>}
-        <div className="design-actions">{saved.parent_id && <button disabled={busy || dirty || uncertain} onClick={() => { void previous(); }}>Предыдущая версия</button>}{historical && <button disabled={busy} onClick={() => setReload((value) => value + 1)}>К актуальной версии</button>}</div>
+        <div className="design-actions">{saved.parent_id && <button disabled={busy || dirty || uncertain} onClick={() => { void previous(); }}>Предыдущая версия</button>}{historical && <button disabled={busy} onClick={() => (onReload ? onReload() : setReload((value) => value + 1))}>К актуальной версии</button>}</div>
         {dirty && <p role="status">Есть новые правки. Результат ниже относится к сохранённой версии.</p>}
         {!!saved.questions.length && <><p>Для продолжения уточните условия.</p><ul>{saved.questions.map((question) => <li key={question.field}>{question.text}</li>)}</ul></>}
-        {result && <><p>Концептуальная схема по заданным условиям.</p><ol className="design-path" aria-label="Размещение устройств">{path.map((id) => <li key={id}>{names.get(id)}</li>)}</ol>
+        {result && <><p>Концептуальная схема по заданным условиям.</p><DiagramViewer key={saved.id} auth={auth} chatId={chatId} revisionId={saved.id} onExpired={onExpired} />
           <p>Логических обменов — {result.counts.logical_exchanges}. Сетевых пар слотов — {result.counts.network_slot_pairs}. Настроек узлов — {result.counts.network_node_settings}. Файловых политик — {result.counts.file_transfer_policies}.</p>
           <ul className="design-warnings">{result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
           <div className="design-table">

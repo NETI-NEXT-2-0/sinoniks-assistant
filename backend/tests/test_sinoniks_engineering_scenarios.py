@@ -1,3 +1,4 @@
+import json
 from xml.etree.ElementTree import fromstring
 
 import pytest
@@ -279,13 +280,16 @@ def test_mixed_design_exports_share_the_corrected_input_and_rule_coverage():
     artifacts = export_files(result)
     assert Design.model_validate_json(artifacts["json"]) == result
     pages = fromstring(artifacts["drawio"]).findall("diagram")
-    assert [page.get("id") for page in pages] == ["topology", "rules-1", "rules-4"]
+    assert [page.get("id") for page in pages] == ["rules-1", "rules-4"]
     labels = [
         cell.get("value", "")
-        for page in pages[1:]
+        for page in pages
         for cell in page.iter("mxCell")
         if cell.get("id", "") in {"rule-1", "rule-2", "rule-3", "rule-4"}
     ]
     for rule, label in zip(result.rules, labels, strict=True):
-        assert rule.id in label and ", ".join(rule.requirement_ids) in label
+        assert rule.service in label
+        rows = json.loads(fromstring(artifacts["drawio"]).get("data-rule-rows"))
+        assert any(row["id"] == rule.id and row["requirement_ids"] == rule.requirement_ids
+                   for row in rows)
         assert f"[{rule.id}]" in artifacts["txt"]

@@ -16,6 +16,8 @@ Label = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 Identifier = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{1,80}$")]
 Side = Literal["A", "B"]
 Mode = Literal["diode", "transport", "filetransfer"]
+Protocol = Literal["TCP", "UDP", "MQTT", "Modbus TCP", "МЭК 104"]
+INDUSTRIAL_PROTOCOLS = frozenset({"MQTT", "Modbus TCP", "МЭК 104"})
 
 
 class StrictModel(BaseModel):
@@ -47,7 +49,7 @@ class Exchange(StrictModel):
     mode: Mode | None = None
     service: Label | None = None
     policy: Label | None = None
-    protocol: Literal["TCP", "UDP"] | None = None
+    protocol: Protocol | None = None
     destination_port: int | None = Field(default=None, ge=1, le=65535, strict=True)
     sources: list[SourceReference] = Field(default_factory=list, max_length=20)
 
@@ -70,6 +72,8 @@ class Exchange(StrictModel):
             self.protocol is not None or self.destination_port is not None
         ):
             raise ValueError("Transport protocol/port belong to network exchanges")
+        if self.mode is None and self.protocol in INDUSTRIAL_PROTOCOLS:
+            self.mode = "transport"
         return self
 
 
@@ -129,6 +133,8 @@ class Rule(Exchange):
 
     @model_validator(mode="after")
     def valid_shared_receiver(self) -> "Rule":
+        if self.protocol in INDUSTRIAL_PROTOCOLS and self.mode != "transport":
+            raise ValueError("Industrial protocols require bidirectional transport")
         if self.additional_senders and (
             self.mode == "filetransfer" or self.protocol is None or self.destination_port is None
             or len(self.senders) != len(set(self.senders))

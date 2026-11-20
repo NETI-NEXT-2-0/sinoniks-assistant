@@ -9,9 +9,11 @@ from sqlalchemy import func, select
 
 from partner_agent.auth.routes import DB, api_rate_limit, authenticated, unsafe_session
 from partner_agent.chats.routes import selected_branch
+from partner_agent.design_service import latest_revision, validate_project_sources
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_stage2 import Message, ResumeCommand, Run
+from partner_agent.project_answers import ProjectAnswer19, apply_answer
 from partner_agent.runs.service import (
     admission_response,
     admit_run,
@@ -25,6 +27,7 @@ from partner_agent.runs.service import (
     save_admission,
 )
 from partner_agent.runs.types import RequestMode
+from partner_agent.sinoniks_contract19 import Requirements19
 
 router = APIRouter(prefix="/api/v1", tags=["runs"], dependencies=[Depends(api_rate_limit)])
 
@@ -36,6 +39,7 @@ class RunBody(BaseModel):
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
     web_mode: Literal["off", "public", "official"] = "off"
     request_mode: RequestMode = "auto"
+    project_answer: ProjectAnswer19 | None = None
 
     @field_validator("message")
     @classmethod
@@ -68,6 +72,8 @@ async def submit(
     _, user = await authenticated(request, db)
     chat = await lock_chat(db, chat_id, user)
     normalized = body.model_dump(mode="json")
+    if body.project_answer is None:
+        normalized.pop("project_answer")
     if body.request_mode == "auto":
         # Keep pre-0027 command hashes replayable, including explicit auto.
         normalized.pop("request_mode")
@@ -78,10 +84,22 @@ async def submit(
     if body.web_mode != "off":
         raise APIError(503, "stage_unavailable", "Web tools are not enabled yet")
     branch = await selected_branch(db, chat, body.branch_id)
+    if body.project_answer is not None:
+        if body.request_mode == "reference" or body.attachment_ids:
+            raise APIError(422, "project_answer_mode_invalid", "Use a project field answer")
+        project = await latest_revision(db, chat.id, branch.id)
+        if project is None or project.id != body.project_answer.base_revision_id:
+            raise APIError(409, "design_revision_conflict", "Reload before answering")
+        await validate_project_sources(db, user, chat.id, project)
+        if project.input.get("schema_version") != 3:
+            raise APIError(409, "project_answer_version_invalid", "Use requirements 1.9")
+        apply_answer(Requirements19.model_validate(project.input), body.project_answer)
     run = await admit_run(
         db, chat, branch, user, body.message, attachment_ids=body.attachment_ids,
         request_mode=body.request_mode,
     )
+    if body.project_answer is not None:
+        run.outcome = {"project_answer": body.project_answer.model_dump(mode="json")}
     result = await admission_response(db, chat, run)
     save_admission(db, chat, user, "run", idempotency_key or "", normalized, run, result)
     await db.commit()
@@ -112,7 +130,14 @@ async def cancel(run_id: uuid.UUID, request: Request, db: DB) -> dict[str, Any]:
         raise APIError(404, "not_found", "Run not found")
     await lock_chat(db, chat_id, user)
     chat, run = await lock_run(db, run_id)
-    await finish_run(db, chat, run, "cancelled", {"reason": "user_cancelled"})
+    outcome: dict[str, Any] = {"reason": "user_cancelled"}
+    if "project_answer" in (run.outcome or {}):
+        # This admitted operation cannot call a model, including after claim.
+        outcome.update({"execution": "local_project_answer", "provider_calls": 0,
+                        "project_answer": (run.outcome or {})["project_answer"]})
+        if "design_input_version" in (run.outcome or {}):
+            outcome["design_input_version"] = (run.outcome or {})["design_input_version"]
+    await finish_run(db, chat, run, "cancelled", outcome)
     result = await run_dto(db, chat, run)
     await db.commit()
     return result

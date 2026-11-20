@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from langgraph.types import Command
 from sqlalchemy import func, select, update
 
-from partner_agent.design_service import capture_design_context, create_revision
+from partner_agent.design_service import capture_design_context, create_revision, revision_status
 from partner_agent.infra.db import session_factory
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import User
@@ -21,6 +21,7 @@ from partner_agent.infra.models_stage2 import (
     RunAttempt,
 )
 from partner_agent.infra.settings import get_settings
+from partner_agent.requirements_service import requirements_answer
 from partner_agent.retrieval.service import validate_evidence_access
 from partner_agent.runs.service import (
     Ownership,
@@ -33,6 +34,7 @@ from partner_agent.runs.service import (
 )
 from partner_agent.runtime.fixture import FixtureState
 from partner_agent.sinoniks_contract import DesignInput
+from partner_agent.sinoniks_contract19 import Requirements19
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class Claim:
     graph_input: FixtureState | Command[Any] | None
     remaining_seconds: float
     user_id: UUID
+    project_answer: dict[str, Any] | None = None
 
 
 async def claim_run(
@@ -151,7 +154,8 @@ async def claim_run(
         await db.flush()
         await assert_ownership(db, run, ownership)
         await db.commit()
-        return Claim(ownership, message.id, graph_input, remaining, run.user_id)
+        return Claim(ownership, message.id, graph_input, remaining, run.user_id,
+                     (run.outcome or {}).get("project_answer"))
 
 
 async def heartbeat(ownership: Ownership) -> None:
@@ -175,13 +179,36 @@ async def heartbeat(ownership: Ownership) -> None:
         await db.commit()
 
 
+def validated_vendor_wishes(value: object, message: str) -> list[dict[str, str]]:
+    if not isinstance(value, list) or len(value) > 5:
+        return []
+    wishes = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        kind, text = item.get("kind"), item.get("text")
+        if (
+            kind in ("unsupported", "free_text") and isinstance(text, str)
+            and 0 < len(text) <= 500 and text.strip() and text in message
+        ):
+            wish = {"kind": kind, "text": text}
+            if wish not in wishes:
+                wishes.append(wish)
+    return wishes
+
+
 async def complete(
     ownership: Ownership, status: str, outcome: dict[str, Any], text: str | None = None,
     *, evidence: list[dict[str, Any]] | None = None,
-    design_input: DesignInput | None = None, design_parent_id: UUID | None = None,
+    design_input: DesignInput | Requirements19 | None = None, design_parent_id: UUID | None = None,
+    vendor_wishes: object = None,
 ) -> str:
     async with session_factory()() as db:
         chat, run = await lock_run(db, ownership.run_id)
+        if status == "succeeded" and outcome.get("answer_mode") == "project_explanation" and (
+            run.request_mode == "reference" or design_parent_id is None or design_input is not None
+        ):
+            raise APIError(409, "request_mode_violation", "Project explanation must be read-only")
         if status == "succeeded" and evidence is not None:
             await assert_ownership(db, run, ownership)
             actor = await db.get(User, run.user_id)
@@ -205,14 +232,38 @@ async def complete(
                 message_id=run.input_message_id,
             )
             outcome = {**outcome, "design_id": str(row.id), "design_revision": row.revision,
-                       "design_status": "needs_clarification" if row.questions else "conceptual"}
-            if row.questions:
+                       "design_status": revision_status(row),
+                       "design_schema_version": row.input.get("schema_version", 2),
+                       "design_has_diagram": "diagram" in row.artifacts,
+                       "design_has_result": row.result is not None,
+                       "design_has_questions": bool(row.questions)
+                       and row.input.get("schema_version") == 3}
+            if row.input.get("schema_version") == 3:
+                text = (str(row.result["explanation"]) if row.result else
+                        requirements_answer(Requirements19.model_validate(row.input)))
+                pending = [question["text"] for question in row.questions
+                           if question["reason"] in ("missing", "conflict")
+                           and not question.get("answered_unknown")]
+                if pending:
+                    text += "\n\nУточните:\n" + "\n".join(f"• {item}" for item in pending)
+            elif row.questions:
                 text = "Сохранил условия проекта. Для продолжения уточните:\n\n" + "\n".join(
                     f"• {question['text']}" for question in row.questions
                 )
             else:
                 assert row.result is not None
                 text = row.result["explanation"] + "\n\nСхема и файлы доступны в карточке проекта."
+        if status == "succeeded" and run.request_mode != "reference" and vendor_wishes is not None:
+            source = await db.get(Message, run.input_message_id)
+            if source is not None:
+                wishes = validated_vendor_wishes(vendor_wishes, source.content)
+                if wishes:
+                    outcome = {**outcome, "vendor_wishes": wishes}
+                    if text is not None:
+                        text += "\n\nПожелания сохранены в сессии. Их можно выгрузить отдельно."
+        metadata = run.outcome or {}
+        if "design_input_version" in metadata:
+            outcome = {"design_input_version": metadata["design_input_version"], **outcome}
         await finish_run(db, chat, run, status, outcome, ownership=ownership, text=text)
         await db.execute(
             update(RunAttempt)

@@ -2,18 +2,18 @@
 
 import json
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import Table, select
 from sqlalchemy.dialects.postgresql import insert
 
 from partner_agent.auth.routes import DB, api_rate_limit, authenticated, unsafe_session
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import utcnow
-from partner_agent.infra.models_accounting import ModelCall, TurnTiming
+from partner_agent.infra.models_accounting import FullTurnTiming, ModelCall, TurnTiming
 from partner_agent.infra.models_stage2 import Run
 from partner_agent.runs.service import TERMINAL, lock_chat
 from partner_agent.runtime.accounting import call_dto
@@ -61,16 +61,27 @@ async def session_accounting(chat_id: UUID, request: Request, db: DB) -> dict[st
         raise APIError(422, "accounting_export_limit", "Session ledger exceeds export limit")
     calls = [call_dto(row) for row in rows]
     known = {row.run_id for row in rows}
-    legacy = sum(run.id not in known and (run.outcome or {}).get("profile") == "openai_compatible"
-                 for run in runs)
+    legacy = sum(
+        run.id not in known and run.started_at is not None
+        and (run.outcome or {}).get("profile") != "offline_fixture"
+        and (run.outcome or {}).get("provider_calls") != 0 for run in runs
+    )
     timings = {row.run_id: row.elapsed_ms for row in (await db.scalars(
         select(TurnTiming).join(Run, Run.id == TurnTiming.run_id).where(Run.chat_id == chat_id)
     )).all()}
+    full = {row.run_id: row.elapsed_ms for row in (await db.scalars(
+        select(FullTurnTiming).join(Run, Run.id == FullTurnTiming.run_id)
+        .where(Run.chat_id == chat_id)
+    )).all()}
+    observed = {**timings, **full}
     turns = [{"turn_id": str(run.id), "status": run.status,
-              "elapsed_ms": timings.get(run.id),
+              "elapsed_ms": observed.get(run.id),
+              "card_elapsed_ms": timings.get(run.id), "full_elapsed_ms": full.get(run.id),
+              "timing_scope": ("full_result" if run.id in full else
+                               "answer_and_card" if run.id in timings else None),
               "server_elapsed_ms": (int((run.finished_at - run.created_at).total_seconds() * 1000)
                                     if run.finished_at else None)} for run in runs]
-    total_ms = sum(timings.values())
+    total_ms = sum(observed.values())
     tariff_complete = all(
         row.tariff.get("eligible_input_price") is True and row.tariff.get("catalog_id")
         and row.tariff.get("provider_variant") and row.tariff.get("snapshot") for row in rows
@@ -90,9 +101,13 @@ async def session_accounting(chat_id: UUID, request: Request, db: DB) -> dict[st
             "accounting_complete": (legacy == 0 and summary["unknown_cost_calls"] == 0
                                     and summary["unfinished_calls"] == 0),
             "tariff_declaration_complete": tariff_complete,
-            "turns": turns, "timing_source": "client_answer_and_result_card",
-            "timing_complete": len(timings) == len(runs),
-            "mean_elapsed_ms": total_ms / len(runs) if runs and len(timings) == len(runs) else None}
+            "turns": turns, "timing_source": "client_scoped_observations",
+            "timing_complete": len(observed) == len(runs),
+            "full_timing_complete": len(full) == len(runs),
+            "mean_full_elapsed_ms": (sum(full.values()) / len(runs)
+                                     if runs and len(full) == len(runs) else None),
+            "mean_elapsed_ms": (total_ms / len(runs)
+                                if runs and len(observed) == len(runs) else None)}
 
 
 @router.get("/{chat_id}/accounting/export")
@@ -107,6 +122,7 @@ async def export_accounting(chat_id: UUID, request: Request, db: DB) -> Response
 class TimingBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     elapsed_ms: int = Field(ge=0, le=86_400_000, strict=True)
+    scope: Literal["answer_and_card", "full_result"] = "answer_and_card"
 
 
 @router.post("/{chat_id}/accounting/turns/{run_id}/rendered")
@@ -121,18 +137,20 @@ async def rendered(
         raise APIError(404, "not_found", "Turn not found")
     if run.status not in TERMINAL and run.status != "waiting_input":
         raise APIError(409, "turn_not_complete", "Turn is still running")
-    existing = await db.get(TurnTiming, run_id)
+    table = cast(Table, FullTurnTiming.__table__ if body.scope == "full_result"
+                 else TurnTiming.__table__)
+    existing = await db.scalar(select(table.c.elapsed_ms).where(table.c.run_id == run_id))
     if existing is not None:
-        return {"turn_id": str(run_id), "elapsed_ms": existing.elapsed_ms}
+        return {"turn_id": str(run_id), "elapsed_ms": existing, "scope": body.scope}
     if run.finished_at is not None:
         floor = int((run.finished_at - run.created_at).total_seconds() * 1000)
         if body.elapsed_ms + 10 < floor:
             raise APIError(422, "timing_before_server_completion", "Invalid elapsed time")
     # The first observation is immutable: refresh/retry cannot shorten the measured step.
-    await db.execute(insert(TurnTiming).values(run_id=run_id, elapsed_ms=body.elapsed_ms,
+    await db.execute(insert(table).values(run_id=run_id, elapsed_ms=body.elapsed_ms,
                                               recorded_at=utcnow())
                      .on_conflict_do_nothing(index_elements=["run_id"]))
     await db.commit()
-    timing = await db.get(TurnTiming, run_id)
-    assert timing is not None
-    return {"turn_id": str(run_id), "elapsed_ms": timing.elapsed_ms}
+    elapsed = await db.scalar(select(table.c.elapsed_ms).where(table.c.run_id == run_id))
+    assert elapsed is not None
+    return {"turn_id": str(run_id), "elapsed_ms": elapsed, "scope": body.scope}

@@ -1,11 +1,12 @@
 import { ApiError, isRecord, type AuthClient } from './client';
 
 export type ExchangeMode = 'transport' | 'diode' | 'filetransfer';
+export const networkProtocols = ['TCP', 'UDP', 'MQTT', 'Modbus TCP', 'МЭК 104'] as const;
 export interface ExchangeInput {
   requirement_id?: string | null;
   sender_side: 'A' | 'B' | null; sender: string | null; receiver: string | null;
   mode: ExchangeMode | null; service: string | null; policy: string | null;
-  protocol?: 'TCP' | 'UDP' | null; destination_port?: number | null;
+  protocol?: typeof networkProtocols[number] | null; destination_port?: number | null;
   sources?: { kind: string; reference: string; revision: number }[];
 }
 export interface DesignInput {

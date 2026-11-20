@@ -26,10 +26,11 @@ class Settings(BaseSettings):
     login_failures_per_minute: int = 5
     api_requests_per_minute: int = 120
     runtime_profile: Literal["offline_fixture", "openai_compatible"] = "offline_fixture"
+    design_input_version: Literal[2, 3] = 3
     model_endpoint: str = ""
     model_name: str = ""
     model_api_key: SecretStr = SecretStr("")
-    model_timeout_seconds: float = 45.0
+    model_timeout_seconds: float = Field(default=45.0, gt=0, allow_inf_nan=False)
     model_max_output_tokens: int = Field(default=3000, ge=128, le=12000)
     model_wire_api: Literal["chat_completions", "responses"] = "chat_completions"
     model_input_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
@@ -50,6 +51,13 @@ class Settings(BaseSettings):
     runtime_graph_version: str = "fixture-v1"
     runtime_fixture_chunk_size: int = 24
     runtime_fixture_delay_seconds: float = 0.1
+
+    @field_validator("design_input_version", mode="before")
+    @classmethod
+    def design_version_environment(cls, value: object) -> object:
+        if isinstance(value, str) and value in ("2", "3"):
+            return int(value)
+        return value
 
     @field_validator("database_url")
     @classmethod

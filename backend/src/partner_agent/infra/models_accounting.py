@@ -40,3 +40,15 @@ class TurnTiming(Base):
     )
     elapsed_ms: Mapped[int] = mapped_column(Integer)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FullTurnTiming(Base):
+    """Full answer/table/SVG observation, separate from historical card-only times."""
+
+    __tablename__ = "turn_render_timings"
+    __table_args__ = (CheckConstraint("elapsed_ms >= 0", name="ck_full_timing_nonnegative"),)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True,
+    )
+    elapsed_ms: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

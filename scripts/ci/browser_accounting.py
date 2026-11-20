@@ -47,7 +47,11 @@ with sync_playwright() as session:
     page.get_by_role("button", name="Войти", exact=True).click()
     new_chat = page.locator("button.new-chat")
     expect(new_chat).to_be_enabled(timeout=20000)
-    new_chat.click()
+    with page.expect_response(lambda response: response.request.method == "POST"
+                              and response.url.endswith("/api/v1/chats")) as creation:
+        new_chat.click()
+    assert creation.value.status == 201
+    created_id = creation.value.json()["id"]
     expect(new_chat).to_be_enabled()
     question = "Accounting browser observation " * 12
     page.get_by_role("textbox", name="Сообщение", exact=True).fill(question)
@@ -60,6 +64,7 @@ with sync_playwright() as session:
         question[:50], timeout=60000,
     )
     chat_id = admission.value.url.split("/chats/", 1)[1].split("/", 1)[0]
+    assert chat_id == created_id
     path = origin + f"/api/v1/chats/{chat_id}/accounting"
     deadline = time.monotonic() + 30
     while True:
@@ -70,6 +75,8 @@ with sync_playwright() as session:
         page.wait_for_timeout(500)
     assert ledger["summary"]["calls_count"] == 0, "Requires offline fixture, no paid requests"
     assert ledger["mean_elapsed_ms"] > 0
+    assert ledger["full_timing_complete"] is True
+    assert ledger["mean_full_elapsed_ms"] == ledger["mean_elapsed_ms"]
     assert ledger["turns"][0]["turn_id"] == run_id
     assert ledger["accounting_complete"] is True
     panel = page.locator(".session-accounting")
@@ -89,5 +96,10 @@ with sync_playwright() as session:
     assert restored["turns"] == ledger["turns"], "Reload changed the original observation"
     verify_formatting_contract(page, ledger, path)
     assert not errors, "Browser runtime error"
+    token = page.request.get(origin + "/api/v1/auth/csrf").json()["csrf_token"]
+    removed = page.request.delete(origin + f"/api/v1/chats/{created_id}", headers={
+        "Origin": origin, "X-CSRF-Token": token,
+    })
+    assert removed.status == 204
     browser.close()
 print("Accounting UI, full answer timing, JSON download and reload verified")

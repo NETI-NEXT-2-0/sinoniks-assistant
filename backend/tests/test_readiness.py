@@ -46,7 +46,7 @@ async def test_blocked_storage_probe_times_out_without_blocking_liveness(monkeyp
     release = threading.Event()
 
     async def schema(_query):
-        return "0028_session_accounting"
+        return "0029_render_timings"
 
     @asynccontextmanager
     async def connected():

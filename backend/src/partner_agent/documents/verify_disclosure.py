@@ -80,6 +80,7 @@ async def verify_units(
             copy.document_id != document_id
             or copy.version_id != version_id
             or copy.canonical_sha256 != artifact_hash
+            or (copy.locator_profile is not None and media_type != "text/markdown")
         ):
             raise APIError(409, "disclosure_integrity_mismatch", "Reviewed copy provenance changed")
         rendered = render_copy(copy, reviewed_copy_sha256)

@@ -96,7 +96,7 @@ async def answer_history(
             continue
         if current_run.request_mode == "reference" and (
             previous.request_mode == "design"
-            or (previous.outcome or {}).get("answer_mode") == "design"
+            or (previous.outcome or {}).get("answer_mode") in ("design", "project_explanation")
         ):
             continue
         questions = [item.content for item in messages if item.role == "user"]
@@ -113,7 +113,9 @@ async def answer_history(
         )
         evidence_ids = previous_context.evidence_ids if previous_context else []
         if ((previous.outcome or {}).get("profile") != "offline_fixture" and not evidence_ids
-                and (previous.outcome or {}).get("answer_mode") not in ("conversation", "design")):
+                and (previous.outcome or {}).get("answer_mode") not in (
+                    "conversation", "design", "project_explanation",
+                )):
             continue
         if len(set(sources) | set(evidence_ids)) > 80:
             break

@@ -79,6 +79,49 @@ def test_citation_allows_layout_whitespace_without_changing_its_words():
     assert result["citations"][0]["quote"] == "Python course"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("locator", "title", "location"), [
+    ({"line": 8}, "Справочник", "Строка источника 8"),
+    (
+        {"positions": [{"page": 4}, {"page": 4}],
+         "context": [{"positions": [{"page": 6}]}]},
+        "Справочник", "Страницы фрагмента: 4, 6",
+    ),
+    (
+        {"reviewed_copy": True, "start": 19, "end": 34, "positions": [{"page": 1}]},
+        "Проверенная редакция · Справочник", "Символы проверенной редакции 20–34",
+    ),
+    (
+        {"reviewed_copy": True, "section": "Правила обмена", "start": 19, "end": 34},
+        "Проверенная редакция · Справочник", "Раздел проверенной редакции: Правила обмена",
+    ),
+    ({"line": True}, "Справочник", None),
+])
+async def test_answer_citation_uses_servers_title_and_location(
+    monkeypatch, locator, title, location,
+):
+    async def complete(settings, messages):
+        payload = {
+            "answer": "Есть подтверждение", "mode": "grounded",
+            "citations": [{
+                "evidence_id": "ref", "quote": "Подтверждённый факт",
+                "title": "Подставное название", "location": "Подставная позиция",
+            }],
+        }
+        return {"choices": [{"message": {"content": json.dumps(payload)}}]}
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", complete)
+    evidence = [{
+        "evidence_id": "ref", "excerpt": "Подтверждённый факт", "title": "Справочник",
+        "locator": locator,
+    }]
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    result = await answer_with_provider(settings, "Вопрос по документу", evidence)
+    citation, = result["citations"]
+    assert citation["title"] == title
+    assert citation.get("location") == location
+
+
 @pytest.mark.parametrize("result", [[], None, {"answer": "x" * 12001, "citations": []},
     {"answer": "ok", "citations": [{"evidence_id": "u1", "quote": "x"}] * 51},
     {"answer": "ok", "citations": [{"evidence_id": [], "quote": "x"}]}])
@@ -171,6 +214,46 @@ async def test_prepared_request_cannot_override_explicit_reference_mode(monkeypa
         await answer_with_provider(
             settings, "Design", [], prepared=prepared, request_mode="reference",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "snapshot", "proposal", "error"), [
+    ("auto", {"revision": 1}, None, None),
+    ("design", {"revision": 1}, None, None),
+    ("reference", {"revision": 1}, None, "provider_request_mode_violation"),
+    ("auto", None, None, "provider_request_mode_violation"),
+    ("design", {"pending_fields": ["x" * 32000]}, None, "provider_request_mode_violation"),
+    ("auto", {"revision": 1}, {}, "provider_invalid_design_mode"),
+])
+async def test_project_explanation_requires_snapshot_and_cannot_propose_changes(
+    monkeypatch, mode, snapshot, proposal, error,
+):
+    async def model(settings, messages):
+        assert ("Saved calculation snapshot:" in messages[-1]["content"]) == (
+            error != "provider_request_mode_violation"
+        )
+        return {"choices": [{"message": {"content": json.dumps({
+            "answer": "В схеме указан один получатель.",
+            "citations": [],
+            "mode": "project_explanation",
+            "design": proposal,
+        })}}]}
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    prepared = prepare_request(
+        "Кто получает журналы?", [], design_context={"network_a": "Saved"},
+        project_calculation=snapshot, request_mode=mode,
+    )
+    if error is not None:
+        with pytest.raises(ProviderError, match=error):
+            await answer_with_provider(
+                settings, "Question", [], prepared=prepared, request_mode=mode,
+            )
+    else:
+        result = await answer_with_provider(settings, "Question", [], prepared=prepared,
+                                            request_mode=mode)
+        assert result["answer_mode"] == "project_explanation" and "design" not in result
 
 
 @pytest.mark.asyncio

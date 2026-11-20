@@ -1,5 +1,8 @@
 """Bounded provider boundary for real model execution."""
 
+import asyncio
+import json
+import zlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
@@ -8,6 +11,49 @@ import httpx
 
 from partner_agent.infra.settings import Settings
 from partner_agent.runtime.accounting import track_model_call
+
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+RESPONSE_CHUNK_BYTES = 64 * 1024
+
+
+async def bounded_response_body(response: httpx.Response) -> bytes:
+    """Bound both raw wire bytes and decompressed JSON, without eager HTTPX decoding."""
+    length = response.headers.get("content-length")
+    if length and length.isascii() and length.isdecimal() and int(length) > MAX_RESPONSE_BYTES:
+        raise ProviderError("provider_response_too_large")
+    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if encoding not in {"", "identity", "gzip", "deflate"}:
+        raise ProviderError("provider_response_encoding")
+    if response.is_stream_consumed:
+        # Mock/custom transports may provide an already buffered, decoded response.
+        # The production network path below reads raw bytes before allocating a full body.
+        try:
+            buffered = response.content
+        except httpx.ResponseNotRead as exc:
+            raise ProviderError("provider_request_failed") from exc
+        if len(buffered) > MAX_RESPONSE_BYTES or response.num_bytes_downloaded > MAX_RESPONSE_BYTES:
+            raise ProviderError("provider_response_too_large")
+        return buffered
+    decoder = (
+        zlib.decompressobj(16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS)
+        if encoding in {"gzip", "deflate"} else None
+    )
+    body = bytearray()
+    received = 0
+    async for chunk in response.aiter_raw(chunk_size=RESPONSE_CHUNK_BYTES):
+        received += len(chunk)
+        if received > MAX_RESPONSE_BYTES:
+            raise ProviderError("provider_response_too_large")
+        # max_length prevents a small compressed chunk from allocating an unbounded result.
+        decoded = (
+            decoder.decompress(chunk, MAX_RESPONSE_BYTES - len(body) + 1) if decoder else chunk
+        )
+        if len(body) + len(decoded) > MAX_RESPONSE_BYTES:
+            raise ProviderError("provider_response_too_large")
+        body.extend(decoded)
+    if decoder is not None and (not decoder.eof or decoder.unused_data):
+        raise ProviderError("provider_request_failed")
+    return bytes(body)
 
 
 class ProviderError(RuntimeError):
@@ -230,20 +276,27 @@ async def chat_completion(
         payload = {"model": settings.model_name, "messages": messages, "stream": False,
                    "max_tokens": settings.model_max_output_tokens}
     async with track_model_call(settings) as captured:
+        body: Any = None
         try:
             factory = client_factory or (lambda **kwargs: httpx.AsyncClient(**kwargs))
-            async with factory(timeout=settings.model_timeout_seconds) as client:
-                response = await client.post(
-                    endpoint,
-                    headers={"Authorization":
-                             f"Bearer {settings.model_api_key.get_secret_value()}"},
-                    json=payload,
-                )
-                body = response.json()
-                captured.body = body
-                response.raise_for_status()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise ProviderError("provider_request_failed") from exc
+            async with asyncio.timeout(settings.model_timeout_seconds):
+                async with factory(timeout=settings.model_timeout_seconds) as client:
+                    async with client.stream(
+                        "POST", endpoint,
+                        headers={"Authorization":
+                                 f"Bearer {settings.model_api_key.get_secret_value()}",
+                                 "Accept-Encoding": "identity, gzip, deflate"},
+                        json=payload,
+                    ) as response:
+                        raw = await bounded_response_body(response)
+                        body = json.loads(raw)
+                        captured.body = body
+                        response.raise_for_status()
+        except TimeoutError as exc:
+            raise ProviderError("provider_request_timeout") from exc
+        except (httpx.HTTPError, ValueError, RecursionError, zlib.error) as exc:
+            usage = normalize_usage(body.get("usage")) if isinstance(body, dict) else None
+            raise ProviderError("provider_request_failed", usage=usage) from exc
         if not isinstance(body, dict):
             raise ProviderError("provider_invalid_response")
         if (

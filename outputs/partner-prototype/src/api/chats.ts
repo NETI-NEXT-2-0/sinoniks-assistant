@@ -10,7 +10,8 @@ export interface Run { id: string; input_message_id: string; branch_id: string; 
 export interface Snapshot { chat: Chat; branches: Branch[]; messages: Message[]; messages_next_cursor: string | null; runs: Run[]; selected_branch_id: string; cursor: number }
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface Admission { run_id: string; message_id: string; status: RunStatus; queue_position: number; events_url: string; branch_id?: string; request_mode: RequestMode }
-export interface RunBody { branch_id: string; message: string; attachment_ids: string[]; web_mode: 'off'; request_mode: RequestMode }
+export interface ProjectAnswerInput { schema_version?: 1; base_revision_id: string; path: string; target_id: string | null; side_network_id: string | null; value?: unknown; unknown?: boolean }
+export interface RunBody { branch_id: string; message: string; attachment_ids: string[]; web_mode: 'off'; request_mode: RequestMode; project_answer?: ProjectAnswerInput }
 export interface ResumeBody { clarification_id: string; answer: string }
 export interface BranchBody { parent_branch_id: string; message_id: string; mode: 'edit' | 'regenerate'; revised_text?: string }
 

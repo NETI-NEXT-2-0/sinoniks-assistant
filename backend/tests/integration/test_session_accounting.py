@@ -10,7 +10,9 @@ from test_chat_data_plane import complete, new_chat, submit
 from test_chat_data_plane import plane as plane
 
 from partner_agent.infra.db import session_factory
+from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_accounting import ModelCall
+from partner_agent.infra.models_stage2 import Run
 from partner_agent.infra.settings import Settings
 from partner_agent.runtime.accounting import accounting_scope
 from partner_agent.runtime.provider import ProviderError, chat_completion
@@ -98,3 +100,20 @@ async def test_failed_and_cancelled_attempts_stay_in_ledger(plane, failure):
     else:
         assert result["summary"]["estimated_cost_usd"] is None
         assert result["summary"]["unknown_cost_calls"] == 1
+
+
+async def test_historical_cancel_without_profile_is_not_reported_as_free(plane):
+    client, headers, _ = await plane()
+    chat = await new_chat(client, headers)
+    run_id = uuid.UUID((await submit(client, headers, chat)).json()["run_id"])
+    await complete(run_id)
+    async with session_factory()() as db:
+        run = await db.get(Run, run_id)
+        run.started_at = utcnow()
+        run.outcome = {"code": "cancelled"}
+        run.status = "cancelled"
+        await db.commit()
+    result = (await client.get(f"/api/v1/chats/{chat['id']}/accounting")).json()
+    assert result["legacy_untracked_turns"] == 1
+    assert result["summary"]["estimated_cost_usd"] is None
+    assert result["accounting_complete"] is False

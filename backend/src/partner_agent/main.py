@@ -28,6 +28,7 @@ from partner_agent.infra.errors import APIError
 from partner_agent.infra.settings import get_settings
 from partner_agent.infra.storage import Storage, create_s3_client
 from partner_agent.runs.routes import router as runs_router
+from partner_agent.vendor_wish_routes import router as vendor_wish_router
 from partner_agent.web.routes import router as web_router
 
 logger = logging.getLogger("partner_agent")
@@ -53,6 +54,7 @@ app.include_router(documents_router)
 app.include_router(design_router)
 app.include_router(web_router)
 app.include_router(accounting_router)
+app.include_router(vendor_wish_router)
 
 
 @app.middleware("http")
@@ -147,7 +149,7 @@ async def ready(request: Request) -> Response:
                     revision = await connection.scalar(
                         text("SELECT version_num FROM alembic_version")
                     )
-                    if revision != "0028_session_accounting":
+                    if revision != "0029_render_timings":
                         return error_response(
                             request, 503, "schema_not_ready", "Migration required", True
                         )

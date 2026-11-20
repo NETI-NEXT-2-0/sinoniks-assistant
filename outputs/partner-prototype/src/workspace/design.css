@@ -28,3 +28,9 @@
 .design-chat-card p{margin:8px 0;color:var(--secondary);line-height:1.6}
 .design-chat-card>div{display:flex;flex-wrap:wrap;gap:8px}.design-chat-card button{padding:7px 11px;border:1px solid var(--stroke);border-radius:7px;background:var(--page);color:var(--ink);font:inherit}
 .design-chat-card button:disabled{opacity:.5;cursor:default}
+
+
+.requirements-panel .design-fields { align-items: start; }
+.requirements-panel .design-fields input,
+.requirements-panel .design-fields select:not([multiple]) { min-height: 40px; }
+.requirements-panel .design-fields select[multiple] { min-height: 84px; }
