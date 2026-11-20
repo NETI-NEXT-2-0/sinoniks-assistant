@@ -11,6 +11,7 @@ from test_design_revisions import design_input
 from test_response_execution import configure_execution
 from test_response_execution import corpus as corpus
 
+from partner_agent.design_service import latest_revision
 from partner_agent.infra.db import session_factory
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models_designs import RunDesignContext
@@ -322,10 +323,18 @@ async def test_inherited_project_revalidates_derived_sources(corpus, monkeypatch
     if revocation == "before":
         await revoke()
     result = await execute_run(UUID(child["run_id"]), dispatch_generation=0)
-    inherited = await latest(client, chat, child["branch_id"])
     assert result["status"] == ("succeeded" if revocation == "none" else "failed")
     assert len(calls) == (2 if revocation == "before" else 3)
     if revocation != "none":
-        assert inherited["id"] == base["id"]
+        denied = await client.get(
+            f"/api/v1/chats/{chat['id']}/designs/latest",
+            params={"branch_id": child["branch_id"]},
+        )
+        assert denied.status_code == 409 and denied.json()["code"] == "source_context_changed"
+        async with session_factory()() as db:
+            inherited = await latest_revision(db, UUID(chat["id"]), UUID(child["branch_id"]))
+            assert str(inherited.id) == base["id"]
         outcome = (await client.get(f"/api/v1/runs/{child['run_id']}")).json()["outcome"]
         assert outcome["code"] == "source_context_changed"
+    else:
+        assert await latest(client, chat, child["branch_id"])

@@ -12,6 +12,7 @@ from test_response_execution import configure_execution
 from test_response_execution import corpus as corpus
 
 from partner_agent.infra.db import session_factory
+from partner_agent.infra.models_designs import DesignRevision
 from partner_agent.infra.models_stage2 import Admission
 from partner_agent.runs.service import body_hash
 from partner_agent.runtime.runner import execute_run
@@ -172,6 +173,130 @@ async def test_queued_requests_keep_their_independent_purposes(plane, monkeypatc
     assert len(calls) == 2 and before["id"] == after["id"]
 
 
+async def test_explain_shared_receiver_without_a_revision_or_reference_history_leak(
+    plane, monkeypatch,
+):
+    client, headers, _ = await plane()
+    configure_execution(monkeypatch)
+    chat = await new_chat(client, headers)
+    base = f"/api/v1/chats/{chat['id']}/designs"
+    branch = chat["default_branch_id"]
+    conditions = design_input()
+    conditions["exchanges"] = [
+        dict(conditions["exchanges"][0], sender=f"ПК-{number}", receiver="Журналы цеха",
+             protocol="UDP", destination_port=514)
+        for number in range(1, 4)
+    ]
+    saved = await client.post(
+        base, headers={**headers, "Idempotency-Key": str(uuid4())},
+        json={"branch_id": branch, "input": conditions},
+    )
+    assert saved.status_code == 201
+    before = saved.json()
+
+    async def model(settings, messages):
+        if "REFERENCE mode" in messages[0]["content"]:
+            assert "Журналы цеха" not in str(messages)
+            assert "Почему правило одно" not in str(messages)
+            return response("conversation")
+        question = messages[-1]["content"]
+        summary = json.loads(question.split("Saved calculation snapshot:\n", 1)[1].splitlines()[0])
+        assert summary["counts"]["logical_exchanges"] == 1
+        assert summary["rule_membership_in_display_order"] == [
+            ["requirement-1", "requirement-2", "requirement-3"],
+        ]
+        assert "Журналы цеха" in question and '"destination_port": 514' in question
+        reply = response("project_explanation")
+        reply["choices"][0]["message"]["content"] = json.dumps({
+            "answer": "ПК используют общий получатель «Журналы цеха», UDP 514.",
+            "citations": [], "mode": "project_explanation", "design": None,
+        })
+        return reply
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    for mode in ("auto", "reference"):
+        message = "Почему правило одно?" if mode == "auto" else "Что такое UDP?"
+        admitted = (await send(client, headers, chat, mode, message=message)).json()
+        assert (await execute_run(UUID(admitted["run_id"]), dispatch_generation=0))[
+            "status"
+        ] == "succeeded"
+        run = (await client.get(f"/api/v1/runs/{admitted['run_id']}")).json()
+        if mode == "auto":
+            assert run["outcome"]["answer_mode"] == "project_explanation"
+            assert "design_id" not in run["outcome"]
+            view = (await client.get(
+                f"/api/v1/chats/{chat['id']}/snapshot", params={"branch_id": branch},
+            )).json()
+            assert next(
+                item["content"] for item in view["messages"]
+                if item["run_id"] == admitted["run_id"] and item["role"] == "assistant"
+            ).startswith("По сохранённой ревизии №1.\n\nПК используют")
+    after = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
+    assert after["id"] == before["id"]
+    assert after["artifact_sha256"] == before["artifact_sha256"]
+
+
+async def test_vendor_wishes_export_preserves_user_words_and_is_private(plane, monkeypatch):
+    client, headers, _ = await plane()
+    outsider, _, _ = await plane("admin")
+    configure_execution(monkeypatch)
+    chat = await new_chat(client, headers)
+    other_chat = await new_chat(client, headers)
+    original = "нужен встроенный антивирус"
+    other = "требуется собственный формат отчёта"
+
+    async def model(settings, messages):
+        current = messages[-1]["content"]
+        reply = response()
+        supported = design_input() if "Передавайте обновления" in current else None
+        reply["choices"][0]["message"]["content"] = json.dumps({
+            "answer": "Проверка ответа", "citations": [], "design": supported,
+            "mode": "design" if supported else "insufficient",
+            "vendor_wishes": [
+                {"kind": "unsupported", "text": original},
+                {"kind": "free_text", "text": other},
+                {"kind": "free_text", "text": "Фраза из другого источника"},
+            ],
+        })
+        return reply
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    turns = []
+    for mode, message in (
+        ("design", f"Передавайте обновления, {original}."),
+        ("auto", f"Ещё раз: {original}."),
+        ("auto", f"Другое: {other}."),
+        ("reference", f"Справочный ход: {other}."),
+    ):
+        admitted = (await send(client, headers, chat, mode, message=message)).json()
+        turns.append(admitted)
+        assert (await execute_run(UUID(admitted["run_id"]), dispatch_generation=0))[
+            "status"
+        ] == "succeeded"
+    base = f"/api/v1/chats/{chat['id']}"
+    revision = (await client.get(
+        base + "/designs/latest", params={"branch_id": chat["default_branch_id"]},
+    )).json()["design"]
+    assert revision["revision"] == 1 and revision["result"]["logical_rule_count"] == 1
+    assert original not in json.dumps(revision["input"], ensure_ascii=False)
+    reference = (await client.get(f"/api/v1/runs/{turns[3]['run_id']}")).json()
+    assert "vendor_wishes" not in reference["outcome"]
+
+    export = base + "/vendor-wishes/export"
+    exported = await client.get(export)
+    assert exported.status_code == 200 and exported.headers["Cache-Control"] == "private, no-store"
+    assert exported.json()["session_id"] == chat["id"]
+    wishes = exported.json()["wishes"]
+    assert [(item["kind"], item["text"], item["message_id"]) for item in wishes] == [
+        ("unsupported", original, turns[0]["message_id"]),
+        ("free_text", other, turns[2]["message_id"]),
+    ]
+    assert (await outsider.get(export)).status_code == 404
+    assert (await client.get(
+        f"/api/v1/chats/{other_chat['id']}/vendor-wishes/export",
+    )).json()["wishes"] == []
+
+
 @pytest.mark.parametrize("guard", ["provider", "completion"])
 async def test_reference_mode_cannot_save_an_adapter_proposal(plane, monkeypatch, guard):
     client, headers, _ = await plane()
@@ -261,6 +386,10 @@ async def test_reference_question_excludes_project_even_after_its_source_is_revo
         "status"
     ] == "succeeded"
     assert len(calls) == 2
-    assert (await client.get(base, params={"branch_id": chat["default_branch_id"]})).json()[
-        "design"
-    ]["id"] == original["id"]
+    denied = await client.get(base, params={"branch_id": chat["default_branch_id"]})
+    assert denied.status_code == 409 and denied.json()["code"] == "source_context_changed"
+    async with session_factory()() as db:
+        revisions = list((await db.scalars(select(DesignRevision).where(
+            DesignRevision.chat_id == UUID(chat["id"]),
+        ))).all())
+        assert len(revisions) == 1 and str(revisions[0].id) == original["id"]

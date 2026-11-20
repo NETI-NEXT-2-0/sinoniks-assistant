@@ -14,6 +14,8 @@ def browser() -> None:
     command(sys.executable, "scripts/ci/application-probe.py", "seed")
     command(sys.executable, "scripts/ci/browser.py")
     command(sys.executable, "scripts/ci/browser_accounting.py")
+    command(sys.executable, "scripts/ci/browser_diagram.py")
+    command(sys.executable, "scripts/ci/browser_requirements.py")
 
 
 def conversion() -> None:

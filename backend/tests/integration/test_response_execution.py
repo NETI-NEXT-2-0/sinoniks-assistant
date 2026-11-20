@@ -73,6 +73,8 @@ def configure_execution(monkeypatch):
     for key, value in {
         "PARTNER_RUNTIME_PROFILE": "openai_compatible",
         "PARTNER_MODEL_ENDPOINT": "https://test.invalid/v1",
+        # Existing scenarios deliberately cover the retained legacy v2 path.
+        "PARTNER_DESIGN_INPUT_VERSION": "2",
         "PARTNER_MODEL_NAME": "synthetic",
         "PARTNER_MODEL_API_KEY": "synthetic",
     }.items():

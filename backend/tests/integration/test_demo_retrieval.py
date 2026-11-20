@@ -94,7 +94,8 @@ async def check_answer(client, headers, question, source, hits, monkeypatch):
         assert context == expected, question.id
         # The response cannot set or replace server-owned provenance.
         forged = (
-            {**citation, "web_source": {"url": "https://forged.example.org"}} if citation else None
+            {**citation, "location": "Forged location",
+             "web_source": {"url": "https://forged.example.org"}} if citation else None
         )
         payload = {"answer": answer, "mode": mode, "citations": [forged] if forged else []}
         return {"choices": [{"message": {"content": json.dumps(payload)}}], "usage": usage}
@@ -112,7 +113,11 @@ async def check_answer(client, headers, question, source, hits, monkeypatch):
     outcome = snapshot["runs"][0]["outcome"]
     expected_citations = []
     if citation and source:
-        expected = {**citation, "title": f"Проверенная редакция · {source['title']}"}
+        start, end = source["locator"]["start"], source["locator"]["end"]
+        expected = {
+            **citation, "title": f"Проверенная редакция · {source['title']}",
+            "location": f"Символы проверенной редакции {start + 1}–{end}",
+        }
         if "web_source" in source:
             expected["web_source"] = WEB_SOURCE
         expected_citations.append(expected)

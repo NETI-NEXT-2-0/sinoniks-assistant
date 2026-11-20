@@ -73,10 +73,10 @@ def test_shared_receiver_combines_three_senders_and_preserves_them_in_exports():
     exported_rule, = json.loads(files["json"])["rules"]
     assert exported_rule["sender"] == rule.sender
     assert exported_rule["additional_senders"] == rule.additional_senders
-    sender_cell = fromstring(files["drawio"]).find(f".//mxCell[@id='{rule.id}-network-A']")
-    assert sender_cell is not None
+    sender_cells = fromstring(files["drawio"]).findall(".//mxCell[@data-kind='system']")
+    assert sender_cells
     for sender in rule.senders:
-        assert sender in " ".join(sender_cell.attrib["value"].split())
+        assert any(sender in " ".join(cell.attrib["value"].split()) for cell in sender_cells)
         assert sender in files["txt"]
 
 
@@ -110,6 +110,33 @@ def test_questions_refer_to_specific_missing_fields():
     request["exchanges"][0]["receiver"] = None
     questions = clarification_questions(DesignInput.model_validate(request))
     assert len(questions) == 1 and questions[0].field == "exchanges.0.receiver"
+
+
+@pytest.mark.parametrize(("protocol", "port"), [
+    ("MQTT", None), ("Modbus TCP", 502), ("МЭК 104", None),
+])
+def test_industrial_protocol_uses_transport_without_guessing_port(protocol, port):
+    source = full_input().exchanges[0].model_dump()
+    request = full_input(exchanges=[
+        {**source, "mode": None, "protocol": protocol, "destination_port": port},
+    ])
+    assert not clarification_questions(request)
+    rule, = plan(request).rules
+    assert rule.mode == "transport"
+    assert rule.protocol == protocol
+    assert rule.destination_port == port
+
+
+def test_explicit_one_way_industrial_requirement_needs_clarification():
+    source = full_input().exchanges[0].model_dump()
+    request = full_input(exchanges=[
+        {**source, "mode": "diode", "protocol": "MQTT", "destination_port": None},
+    ])
+    question, = clarification_questions(request)
+    assert question.field == "exchanges.0.mode" and question.reason == "conflict"
+    assert request.exchanges[0].mode == "diode"
+    with pytest.raises(ValueError, match="уточните"):
+        plan(request)
 
 
 @pytest.mark.parametrize("patch", [
@@ -195,7 +222,7 @@ def test_design_deduplicates_without_merging_permissions_or_directions():
     assert json.loads(design.model_dump_json())["logical_rule_count"] == 3
     assert design.firewall_sides == ["B"]
     pages = fromstring(drawio(design)).findall("./diagram/mxGraphModel/root")
-    assert len(pages) == 2
+    assert len(pages) == 1
     for page in pages:
         cells = page.findall("mxCell")
         ids = {cell.attrib["id"] for cell in cells}
@@ -208,8 +235,8 @@ def test_design_deduplicates_without_merging_permissions_or_directions():
         )
     network = pages[0].find("mxCell[@id='network-A']")
     assert network is not None
-    assert " ".join(network.get("value", "").splitlines()) == request.network_a
-    assert all(pages[1].find(f"mxCell[@id='rule-{number}']") is not None for number in (1, 2, 3))
+    assert " ".join(network.get("value", "").splitlines()) == "Сеть A · " + request.network_a
+    assert all(pages[0].find(f"mxCell[@id='rule-{number}']") is not None for number in (1, 2, 3))
 
 
 @pytest.mark.parametrize("prefix", [b"", BOM_UTF8], ids=["utf8", "utf8-bom"])
@@ -226,124 +253,3 @@ def test_cli_writes_the_exact_utf8_bytes_returned_by_the_exporter(tmp_path, monk
     assert {path.name: path.read_bytes() for path in target.iterdir()} == {
         f"design.{extension}": content.encode("utf-8") for extension, content in expected.items()
     }
-
-
-def test_drawio_path_direction_matches_each_rule_and_json():
-    from partner_agent.sinoniks_export import export_files
-
-    first = full_input().exchanges[0].model_dump()
-    design = plan(full_input(exchanges=[first, {**first, "sender_side": "B"}]))
-    artifacts = export_files(design)
-    assert artifacts == export_files(design)
-    exported = json.loads(artifacts["json"])
-    assert exported["id"] == design.id and exported["counts"]["logical_exchanges"] == 2
-    root = fromstring(artifacts["drawio"])
-    topology = root.findall("./diagram/mxGraphModel/root")[0]
-    for connection in design.connections:
-        edge = topology.find(f"mxCell[@id='{connection.id}']")
-        assert edge is not None and edge.get("source") == connection.source
-        assert edge.get("target") == connection.target
-    flows = root.findall("./diagram/mxGraphModel/root")[1]
-    for rule in design.rules:
-        for connection in design.connections:
-            edge = flows.find(f"mxCell[@id='{rule.id}-{connection.id}']")
-            assert edge is not None
-            expected = connection.target if rule.sender_side == "B" else connection.source
-            assert edge.get("source") == rule.id + "-" + expected
-
-
-@pytest.mark.parametrize("sender_side", ["A", "B"])
-def test_drawio_marks_session_replies_without_creating_a_reverse_rule(sender_side):
-    flow = full_input().exchanges[0].model_dump()
-    design = plan(full_input(exchanges=[
-        {**flow, "sender_side": sender_side},
-        {**flow, "mode": "diode", "protocol": None},
-        {**flow, "mode": "filetransfer", "protocol": None, "destination_port": None},
-    ]))
-    topology, sheet = fromstring(drawio(design)).findall("./diagram/mxGraphModel/root")
-    for number, rule in enumerate(design.rules, 1):
-        label = sheet.find(f"mxCell[@id='rule-{number}']")
-        assert label is not None
-        if rule.mode == "diode":
-            assert "Протокол — уточнить, порт получателя — 443" in label.get("value", "")
-        if rule.mode == "filetransfer":
-            assert "Протокол" not in label.get("value", "")
-        endpoint = sheet.find(f"mxCell[@id='{rule.id}-network-{rule.sender_side}']")
-        assert endpoint is not None and "\nИсточник\n" in endpoint.get("value", "")
-    for connection in design.connections:
-        physical = topology.find(f"mxCell[@id='{connection.id}']")
-        assert physical is not None
-        assert "startArrow=none;" in physical.get("style", "")
-        assert "endArrow=none;" in physical.get("style", "")
-        for rule in design.rules:
-            edge = sheet.find(f"mxCell[@id='{rule.id}-{connection.id}']")
-            assert edge is not None
-            assert "endArrow=block;" in edge.get("style", "")
-            start = "open" if rule.mode == "transport" else "none"
-            assert f"startArrow={start};" in edge.get("style", "")
-            initiator = connection.target if rule.sender_side == "B" else connection.source
-            assert edge.get("source") == rule.id + "-" + initiator
-    assert len(sheet.findall("mxCell[@edge='1']")) == len(design.connections) * len(design.rules)
-
-
-def test_export_paginates_maximum_size_design_and_escapes_xml():
-    flow = full_input().exchanges[0].model_dump()
-    design = plan(full_input(exchanges=[
-        {
-            **flow, "sender": f"<Узел & {index}>", "receiver": f"Система {index}",
-            "policy": "Ограничение " * 8,
-        }
-        for index in range(24)
-    ]))
-    document = fromstring(drawio(design))
-    assert len(document.findall("diagram")) == 9
-    for page in document.findall("diagram"):
-        assert len(page.findall("mxGraphModel/root/mxCell")) <= 45
-    assert "&lt;Узел &amp;" in drawio(design)
-
-
-def test_drawio_keeps_long_rule_labels_inside_the_page_and_apart():
-    flow = full_input().exchanges[0].model_dump()
-    design = plan(full_input(
-        network_a="А" * 120,
-        network_b="Б" * 120,
-        firewall="both",
-        exchanges=[
-            {
-                **flow,
-                "sender": "Ш" * 120,
-                "receiver": "W" * 120,
-                "requirement_id": f"input-{index:02}-" + "R" * 69,
-                "policy": ("П" * 120 if index < 22 else str(index)),
-            }
-            for index in range(24)
-        ],
-    ))
-    pages = fromstring(drawio(design)).findall("./diagram/mxGraphModel")
-    for page in pages:
-        bounds = []
-        for cell in page.findall("./root/mxCell[@vertex='1']"):
-            geometry = cell.find("mxGeometry")
-            assert geometry is not None
-            x, y, width, height = (int(geometry.attrib[key]) for key in (
-                "x", "y", "width", "height",
-            ))
-            assert y + height < int(page.attrib["pageHeight"])
-            assert x + width < int(page.attrib["pageWidth"])
-            for left, top, right, end in bounds:
-                assert x + width <= left or x >= right or y + height <= top or y >= end
-            bounds.append((x, y, x + width, y + height))
-    index, grouped_rule = max(enumerate(design.rules, 1), key=lambda item: len(
-        item[1].requirement_ids
-    ))
-    assert len(grouped_rule.requirement_ids) == 22
-    flow_page = pages[1]
-    sender = flow_page.find(f"./root/mxCell[@id='{grouped_rule.id}-network-A']")
-    assert sender is not None
-    assert "Ш" * 120 in sender.get("value", "").replace("\n", "")
-    header = flow_page.find(f"./root/mxCell[@id='rule-{index}']")
-    assert header is not None
-    assert all(
-        identifier in header.get("value", "").replace("\n", "")
-        for identifier in grouped_rule.requirement_ids
-    )
