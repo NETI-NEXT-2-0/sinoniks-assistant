@@ -5,6 +5,7 @@ import unicodedata
 from pathlib import Path
 
 from partner_agent.sinoniks_contract import (
+    INDUSTRIAL_PROTOCOLS,
     Connection,
     Counts,
     Device,
@@ -46,6 +47,15 @@ def clarification_questions(request: DesignInput) -> list[Question]:
             field="exchanges", text="Какие данные или файлы передаются и в каком направлении?",
         ))
     for index, exchange in enumerate(request.exchanges):
+        if exchange.protocol in INDUSTRIAL_PROTOCOLS and exchange.mode == "diode":
+            questions.append(Question(
+                field=f"exchanges.{index}.mode",
+                text=(
+                    f"Обмен {index + 1} — для {exchange.protocol} нужен двунаправленный режим. "
+                    "Допустимы ли ответы в рамках соединения или нужно изменить протокол?"
+                ),
+                reason="conflict",
+            ))
         for field, text in (
             ("sender_side", "из какого контура начинается обмен"),
             ("sender", "кто отправляет"), ("receiver", "кто получает"),
