@@ -9,6 +9,44 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def edit_scenario(proposal: dict, question: str) -> tuple[str, str] | None:
+    """Reserved U03 markers exercise persistence, not semantic interpretation."""
+    if "Синтетический U03" not in question:
+        return None
+    if "начало" in question:
+        flow = proposal["flows"][0]
+        proposal["systems"] = [
+            {"id": f"sender-{n}", "name": f"Источник {n}",
+             "network_id": flow["sender_network_id"]} for n in range(1, 4)
+        ] + [{"id": "receiver", "name": "Приёмник", "network_id": flow["receiver_network_id"]}]
+        flow["sender_ids"] = [f"sender-{n}" for n in range(1, 4)]
+        flow["receiver_ids"] = ["receiver"]
+    if "добавить" in question:
+        flow = proposal["flows"][0]
+        proposal["systems"].append({"id": "receiver-extra", "name": "Резервный приёмник",
+                                    "network_id": flow["receiver_network_id"]})
+        flow["receiver_ids"].append("receiver-extra")
+    if "переименовать" in question:
+        next(system for system in proposal["systems"] if system["name"] == "Резервный приёмник")[
+            "name"
+        ] = "Архив журналов"
+    if "неоднозначно удалить" in question:
+        return "insufficient", "Какой сервер удалить: Приёмник или Архив журналов?"
+    if "удалить Архив журналов" in question:
+        chosen = next(system["id"] for system in proposal["systems"]
+                      if system["name"] == "Архив журналов")
+        proposal["systems"] = [system for system in proposal["systems"] if system["id"] != chosen]
+        for flow in proposal["flows"]:
+            flow["receiver_ids"] = [identifier for identifier in flow["receiver_ids"]
+                                     if identifier != chosen]
+    if "открыть подсеть" in question:
+        return "insufficient", ("Прямое соединение подсетей не входит в проект обмена. "
+                                "Схема сохранена.")
+    if "объяснить" in question:
+        return "project_explanation", "Три источника отправляют журналы одному приёмнику UDP 514."
+    return "design", "Синтетическая правка требований."
+
+
 def incomplete_scenario(proposal: dict, question: str) -> None:
     """Fixed synthetic cases only; this is not free-text extraction or a product fallback."""
     if "Синтетические две открытые сети" in question:
@@ -125,6 +163,11 @@ def fixture_body(messages: list[dict] | None = None) -> dict:
         "citations": [],
         "answer": "Синтетический проект для проверки интерфейса и таймера. " * 12,
     }
+    edit = edit_scenario(proposal, messages[-1]["content"].split("Evidence:", 1)[0]) \
+        if requirements else None
+    if edit:
+        mode, text = edit
+        answer.update(mode=mode, answer=text, design=proposal if mode == "design" else None)
     return {
         "id": "synthetic-" + uuid.uuid4().hex,
         "model": "synthetic-diagram",
