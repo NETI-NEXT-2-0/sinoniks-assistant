@@ -46,6 +46,8 @@ async def export_vendor_wishes(chat_id: UUID, request: Request, db: DB) -> JSONR
     combined.sort(key=lambda item: item[0]["queue_seq"])
     for row, entries, origin in combined:
         for entry in entries:
+            if entry.get("purpose") == "project_clarification":
+                continue
             key = (
                 entry["kind"], entry["text"], entry.get("base_revision_id"), entry.get("path"),
             )

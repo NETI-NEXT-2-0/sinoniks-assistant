@@ -39,6 +39,7 @@ function WorkspaceError({ error }: { error: unknown }) {
   if (error instanceof ApiError && error.code === 'clipboard_unavailable') message = 'Копирование недоступно в этом браузере. Выделите текст ответа.';
   if (error instanceof ApiError && error.status === 422) message = 'Проверьте сообщение. Максимум — 32 КиБ текста.';
   if (error instanceof ApiError && ['question_context_changed', 'design_revision_conflict'].includes(error.code)) message = 'Условия проекта уже изменились. Откройте актуальную версию и выберите ответ снова.';
+  if (error instanceof ApiError && error.code === 'project_answer_text_limit') message = 'В пакете слишком много текста. Примените ответы по частям.';
   if (error instanceof ApiError && error.code === 'invalid_project_answer') message = 'Ответ не согласуется с другими условиями. Проверьте поле в актуальном проекте.';
   return <div className="workspace-error" role="alert"><p>{message}</p>{error instanceof ApiError && error.requestId && <span className="request-reference">Номер запроса: {error.requestId}</span>}</div>;
 }
@@ -46,6 +47,7 @@ function WorkspaceError({ error }: { error: unknown }) {
 function runLabel(run?: Run): string {
   const outcome = isRecord(run?.outcome) ? run.outcome : null;
   const profile = outcome?.profile ?? run?.runtime_profile;
+  if (outcome?.execution === 'model_project_answer') return 'Уточнение · разбор свободного ответа';
   if (outcome?.execution === 'local_project_answer') return 'Уточнение · без вызова модели';
   if (profile === 'offline_fixture') return 'Офлайн-стенд · без LLM';
   if (outcome?.answer_mode === 'project_explanation') return 'Синоникс · пояснение схемы';

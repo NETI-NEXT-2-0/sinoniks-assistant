@@ -47,6 +47,7 @@ class Claim:
     remaining_seconds: float
     user_id: UUID
     project_answer: dict[str, Any] | None = None
+    interpret_project_answer: bool = False
 
 
 async def claim_run(
@@ -157,7 +158,8 @@ async def claim_run(
         await assert_ownership(db, run, ownership)
         await db.commit()
         return Claim(ownership, message.id, graph_input, remaining, run.user_id,
-                     (run.outcome or {}).get("project_answer"))
+                     (run.outcome or {}).get("project_answer"),
+                     bool((run.outcome or {}).get("interpret_project_answer")))
 
 
 async def heartbeat(ownership: Ownership) -> None:
