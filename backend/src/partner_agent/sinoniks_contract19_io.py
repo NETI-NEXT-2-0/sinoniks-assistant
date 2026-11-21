@@ -139,9 +139,21 @@ def assess(request: Requirements19) -> Assessment19:
             issue(f"/systems/{index}/network_id", "К какой сети относится система?")
     for index, flow in enumerate(request.flows):
         root = f"/flows/{index}"
-        for field in ("sender_network_id", "receiver_network_id", "sender_ids"):
-            if getattr(flow, field) in (None, []):
-                issue(root + "/" + field, "Уточните участников и направление потока.")
+        if flow.sender_network_id is None:
+            issue(root + "/sender_network_id", "Из какой сети идёт поток?")
+        if flow.receiver_network_id is None:
+            issue(root + "/receiver_network_id", "В какую сеть идёт поток?")
+        file_source = next(
+            (side for side in flow.sides if side.network_id == flow.sender_network_id),
+            None,
+        ) if isinstance(flow, FileFlow19) else None
+        if not flow.sender_ids and not (
+            file_source is not None and (
+                file_source.manual is True or file_source.usb is True or file_source.actor_ids
+                or any(setting.operation == "PULL" for setting in file_source.automations)
+            )
+        ):
+            issue(root + "/sender_ids", "Какая система отправляет поток?")
         if not flow.receiver_ids and not (
             isinstance(flow, DataFlow19) and flow.application == "ntp"
         ):

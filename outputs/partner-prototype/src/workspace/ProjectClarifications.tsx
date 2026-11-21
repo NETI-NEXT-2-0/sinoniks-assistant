@@ -10,6 +10,7 @@ interface Question {
   target_id: string | null;
   side_network_id: string | null;
   kind: string;
+  reason?: string;
   choices: { label: string; value: unknown }[];
 }
 interface Page {
@@ -382,7 +383,7 @@ export function ProjectClarifications({
                     : "Сохранить ответ"}
                 </button>
               )}
-              {question.kind !== "unsupported" && (
+              {question.kind !== "unsupported" && question.reason !== "conflict" && (
                 <button
                   type="button"
                   onClick={() => {

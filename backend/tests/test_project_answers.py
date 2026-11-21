@@ -58,11 +58,14 @@ def test_answer_updates_one_field_and_rejects_a_different_entity():
 
 
 def test_unknown_is_saved_and_replaced_only_when_that_field_is_answered():
-    request = Requirements19.model_validate(data_project())
+    document = data_project()
+    document["flows"][0]["protocol"] = None
+    request = Requirements19.model_validate(document)
     unknown = apply_answer(request, command(unknown=True, value=None))
     assert unknown.flows[0].protocol is None
     assert unknown.unknowns[0].reason == "user_unknown"
     assert unknown.unknowns[0].target_id == "logs"
+    assert apply_answer(unknown, command(unknown=True, value=None)) == unknown
     answered = apply_answer(unknown, command())
     assert not answered.unknowns and answered.flows[0].protocol == "UDP"
     with pytest.raises(ValidationError):
@@ -90,6 +93,51 @@ def test_file_side_identity_must_match_its_saved_network():
     with pytest.raises(APIError) as caught:
         apply_answer(request, answer.model_copy(update={"side_network_id": "office"}))
     assert caught.value.code == "question_context_changed"
+
+
+@pytest.mark.parametrize("field", ["manual", "usb", "checks", "received_files_shared"])
+def test_unknown_cannot_clear_known_file_side_fields(field):
+    request = Requirements19.model_validate(file_project())
+    with pytest.raises(APIError) as caught:
+        apply_answer(request, command(
+            path=f"/flows/0/sides/0/{field}", target_id="files", side_network_id="plant",
+            unknown=True, value=None,
+        ))
+    assert caught.value.code == "question_context_changed"
+
+
+@pytest.mark.parametrize("usb", [True, False])
+def test_manual_file_questions_keep_the_known_sender_and_identify_the_receiving_side(usb):
+    document = file_project()
+    document["actors"] = [{"id": "person", "name": "Оператор"}]
+    document["manual_users"] = {"lower": 1, "upper": 1}
+    flow = document["flows"][0]
+    flow.update(
+        direction="forward", sender_network_id="office", receiver_network_id="plant",
+        sender_ids=[], receiver_ids=["sender"],
+    )
+    source, destination = reversed(flow["sides"])
+    source.update(
+        manual=True, usb=usb, actor_ids=["person"], automations=[],
+        checks=[{"kind": "signature"}], manual_protocol=None if usb else "SFTP",
+    )
+    destination.update(checks=None, received_files_shared=None, access_group="operations")
+    request = Requirements19.model_validate(document)
+    questions = {question["field"]: question for question in question_choices(request)}
+    assert set(questions) == {
+        "/flows/0/sides/0/checks", "/flows/0/sides/0/received_files_shared",
+    }
+    assert all("Узел В" in question["text"] for question in questions.values())
+    assert "operations" in questions["/flows/0/sides/0/received_files_shared"]["text"]
+    for question in questions.values():
+        request = apply_answer(request, command(
+            path=question["field"], target_id=question["target_id"],
+            side_network_id=question["side_network_id"], unknown=True, value=None,
+        ))
+    assert request.flows[0].sides[1].model_dump(exclude={"sources"}) == (
+        Requirements19.model_validate(document).flows[0].sides[1].model_dump(exclude={"sources"})
+    )
+    assert not question_choices(request)
 
 
 def test_choices_expose_values_and_human_labels_without_provenance():
