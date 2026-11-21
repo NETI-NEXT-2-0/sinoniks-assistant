@@ -9,6 +9,7 @@ from partner_agent.infra import (
     models_chat_files,  # noqa: F401 -- register private chat files
     models_designs,  # noqa: F401 -- register project revisions
     models_documents,  # noqa: F401 -- register document metadata
+    models_feedback,  # noqa: F401 -- voluntarily submitted ratings/comments
     models_stage2,  # noqa: F401 -- register stage-2 metadata
 )
 from partner_agent.infra.models import Base
