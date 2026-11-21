@@ -6,9 +6,13 @@ from partner_agent.sinoniks_file_rules import calculate_file_rules
 
 def test_explicit_classification_overrides_misleading_names():
     assert Actor19(id="dept", name="Инженерный отдел", classification="group").is_collective()
-    assert Actor19(id="dept2", name="Сотрудники отдела эксплуатации", classification="group").is_collective()
+    assert Actor19(
+        id="dept2", name="Сотрудники отдела эксплуатации", classification="group",
+    ).is_collective()
     assert not Actor19(id="ivanov", name="Группа Иванов", classification="person").is_collective()
-    assert not Actor19(id="engineer", name="Инженер Иванов", classification="person").is_collective()
+    assert not Actor19(
+        id="engineer", name="Инженер Иванов", classification="person",
+    ).is_collective()
 
 
 def test_legacy_actor_dump_preserves_existing_shape_and_prefix_fallback():
