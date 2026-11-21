@@ -10,7 +10,7 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from uuid import UUID
-from xml.etree.ElementTree import ParseError, fromstring
+from xml.etree.ElementTree import Element, ParseError, fromstring
 
 from partner_agent.benchmark_audit import MAX_BYTES, compare_native_export, read_json
 from partner_agent.runtime.accounting_math import priced_usage
@@ -260,6 +260,7 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
         if case in PROJECT_CASES - {"N01", "U04-open"}:
             required.add("drawio")
         data = {}
+        native_export: Element | None = None
         for kind in ("snapshot", "ledger", "expert", "drawio"):
             if row[kind] is None:
                 if kind in required:
@@ -273,7 +274,7 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
                     if (native is None or native.tag != "mxfile"
                             or not 1 <= len(native.findall("diagram")) <= 86):
                         raise ValueError("Invalid native XML")
-                    data[kind] = native
+                    native_export = native
                 else:
                     content, parsed_hash = read_json(path)
                     if parsed_hash != digest:
@@ -288,9 +289,9 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
                 hashes[kind] = digest
             except (OSError, ValueError, ParseError, TypeError, AttributeError):
                 problems.append("invalid_" + kind)
-        if "expert" in data and "drawio" in data:
+        if "expert" in data and native_export is not None:
             try:
-                problems.extend(compare_native_export(data["expert"], data["drawio"]))
+                problems.extend(compare_native_export(data["expert"], native_export))
             except (KeyError, ValueError, TypeError, AttributeError):
                 problems.append("invalid_export_rule_metadata")
         ledger = data.get("ledger", {})
