@@ -67,8 +67,20 @@ class System19(StrictModel):
 class Actor19(StrictModel):
     id: Identifier
     name: Name19 | None = None
+    # Explicit identity takes precedence over the name. None denotes a legacy record.
+    classification: Literal["person", "group"] | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        document = cast(dict[str, Any], handler(self))
+        if self.classification is None:
+            document.pop("classification", None)
+        return document
 
     def is_collective(self) -> bool:
+        if self.classification is not None:
+            return self.classification == "group"
+        # Compatibility for stored v3 projects written before classification existed.
         return bool(re.match(
             r"^(?:отдел|подразделение|группа|команда|департамент|"
             r"department|division|group|team)\b",
