@@ -135,7 +135,7 @@ export function DiagramViewer({ auth, chatId, revisionId, onExpired, onReady }: 
       {page.edges.map(edge => <polyline key={edge.id} data-edge-id={edge.id} points={edge.points.map(p => p.join(',')).join(' ')} fill="none" stroke={edge.color} strokeWidth={2} strokeDasharray={edge.dashed ? '5 5' : undefined} markerStart={marker(edge, true)} markerEnd={marker(edge, false)}><title>{edge.rule_id}</title></polyline>)}
       {page.boxes.filter(item => !['zone', 'appliance'].includes(item.kind)).sort((a, b) => Number(a.kind === 'detail') - Number(b.kind === 'detail')).map(box)}
     </svg><p className="diagram-hint">Потяните схему для перемещения. Масштаб указан относительно полного вида. Текст элементов доступен при наведении.</p>
-    {scene.rule_rows && <div className="diagram-rule-table" role="region" aria-label="Правила сохранённой схемы" tabIndex={0}><table>
+    {scene.rule_rows && scene.rule_rows.length > 0 && <div className="diagram-rule-table" role="region" aria-label="Правила сохранённой схемы" tabIndex={0}><table>
       <thead><tr><th>№</th><th>Отправители → получатель</th><th>Режим</th><th>Протокол / порт</th><th>Назначение и условия</th></tr></thead>
       <tbody>{scene.rule_rows.map((row, n) => {
         const arrow = row.two_way ? '↔' : '→';
