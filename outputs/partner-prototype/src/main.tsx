@@ -1,3 +1,4 @@
+import { clearClarificationDrafts } from "./workspace/clarificationDraft";
 import { product } from './product';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -129,6 +130,7 @@ function App() {
   useEffect(() => { void initialize(); }, [initialize]);
 
   const expireSession = useCallback((): void => {
+    clearClarificationDrafts();
     auth.reset();
     setMenu(false);
     void initialize('Сессия истекла. Войдите снова.');
@@ -181,6 +183,7 @@ function App() {
     ++epoch.current; logoutActive.current = true; setLogoutPending(true); setSessionError(null);
     try {
       await auth.logout();
+      clearClarificationDrafts();
       setMenu(false); setSession({ kind: 'signed-out' });
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 401) {

@@ -7,6 +7,7 @@ import type { ReadinessReport } from "../api/readiness";
 import { ProjectReadiness } from "./ProjectReadiness";
 
 interface Props {
+  ownerId: string;
   readiness?: ReadinessReport | null;
   auth: AuthClient;
   chatId: string;
@@ -26,6 +27,7 @@ interface Props {
   onDiagramReady?: () => void;
 }
 export function DesignResultCard({
+  ownerId,
   readiness,
   auth,
   chatId,
@@ -134,7 +136,8 @@ export function DesignResultCard({
       </div>
       {hasQuestions && branchId && onAnswer && (
         <ProjectClarifications
-          key={JSON.stringify([chatId, branchId, id])}
+          ownerId={ownerId}
+          key={JSON.stringify([ownerId, chatId, branchId, id])}
           auth={auth}
           chatId={chatId}
           branchId={branchId}

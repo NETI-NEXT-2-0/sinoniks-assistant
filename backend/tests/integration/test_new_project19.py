@@ -136,7 +136,10 @@ async def test_new_project_cannot_accept_a_silently_downgraded_model_reply(plane
     response = (await submit(client, headers, chat, text="Спроектируй обмен")).json()
     assert (await execute_run(UUID(response["run_id"]), dispatch_generation=0))[
         "status"
-    ] == "failed"
+    ] == "succeeded"
+    outcome = (await client.get(f"/api/v1/runs/{response['run_id']}")).json()["outcome"]
+    assert outcome["response_status"] == "needs_clarification"
+    assert outcome["task_completed"] is False
     current = (
         await client.get(
             f"/api/v1/chats/{chat['id']}/designs/latest",

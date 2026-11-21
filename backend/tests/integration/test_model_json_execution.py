@@ -81,11 +81,16 @@ async def test_invalid_model_json_never_publishes_but_keeps_call_cost(
     assert admitted.status_code == 202
     run_id = UUID(admitted.json()["run_id"])
     result = await execute_run(run_id, dispatch_generation=0)
-    assert result["status"] == "failed"
+    assert result["status"] == "succeeded"
     assert len(requests) == 1
     snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
-    assert not any(message["role"] == "assistant" for message in snapshot["messages"])
+    assistant, = [item for item in snapshot["messages"] if item["role"] == "assistant"]
+    assert assistant["content"] and "hidden" not in assistant["content"]
+    assert "later" not in assistant["content"] and "\x00" not in assistant["content"]
     outcome = snapshot["runs"][0]["outcome"]
+    assert outcome["response_status"] == "needs_clarification"
+    assert outcome["task_completed"] is False
+    assert outcome["citations"] == []
     assert outcome["code"] == "provider_invalid_rag_json"
     assert outcome["usage"] == {"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}
     async with session_factory()() as db:
