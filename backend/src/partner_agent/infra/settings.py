@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     absolute_ttl_seconds: int = 604800
     login_failures_per_minute: int = 5
     self_registration_enabled: bool = False
+    demo_public_knowledge: bool = False
     developer_diagnostics_enabled: bool = False
     registration_attempts_per_minute: int = Field(default=5, gt=0)
     api_requests_per_minute: int = 120
