@@ -108,7 +108,8 @@ def call_dto(row: ModelCall) -> dict[str, Any]:
         "ended_at": row.ended_at.isoformat() if row.ended_at else None,
         "response_id": row.response_id, "error_code": row.error_code,
         "raw_usage_format": "numeric_projection_no_response_content",
-        "usage_source": "provider" if row.usage.get("raw") else "unknown",
+        "usage_source": ("operator_provider_export" if row.usage.get("reconciliation")
+                         else "provider" if row.usage.get("raw") else "unknown"),
         "usage": row.usage, "tariff": row.tariff,
         **priced_usage(row.usage, row.tariff.get("input_usd_per_million"),
                        row.tariff.get("output_usd_per_million")),
