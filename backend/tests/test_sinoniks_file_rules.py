@@ -1,5 +1,9 @@
+import json
 from xml.etree import ElementTree
 
+import pytest
+
+from partner_agent.requirements_result import result_artifacts19
 from partner_agent.sinoniks_calculation import calculate_rules, solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_contract19_io import assess
@@ -84,7 +88,7 @@ def test_f04_manual_sftp_and_smb_push_need_one_known_user():
 def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     request = plan([
         files(
-            "updates", side("office", usb=True, actor_ids=["operator"],
+            "updates", side("office", manual=True, usb=True, actor_ids=["operator"],
                             checks=[{"kind": "icap", "icap_service": "antivirus"}]),
             side("plant", automations=[automation("PUSH", "plant", "SMB")]),
             sender_ids=["media"], receiver_ids=["plant-store"],
@@ -130,6 +134,26 @@ def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     assert any(cell.get("source") == "usb-1" and cell.get("target") == "node-A"
                for cell in xml.findall(".//mxCell"))
     assert xml.find(".//mxCell[@id='node-A'][@vertex='1']") is not None
+
+
+@pytest.mark.parametrize("manual_protocol", [None, "SFTP"])
+def test_usb_only_shows_sftp_when_it_is_explicitly_specified(manual_protocol):
+    request = plan([files(
+        "updates",
+        side("office", manual=True, usb=True, manual_protocol=manual_protocol,
+             actor_ids=["operator"]),
+        side("plant", automations=[automation("PUSH", "plant", "SMB")]),
+        receiver_ids=["plant-store"],
+    )])
+    result, artifacts = result_artifacts19(request, session_id="usb-export")
+    rule, = result["rules"]
+    diagram = ElementTree.fromstring(artifacts["drawio"])
+    row, = json.loads(diagram.attrib["data-rule-rows"])
+    assert row["id"] == rule["rule_id"] and row["number"] == rule["id"]
+    assert (row["sender_side"], row["two_way"]) == ("A", False)
+    for medium in (artifacts["txt"], rule["protocol"]["office"], row["protocol"]):
+        assert "USB" in medium and ("SFTP" in medium) == (manual_protocol is not None)
+    assert "SMB PUSH" in row["protocol"]
 
 
 def test_same_profile_merges_both_directions_and_deduplicates_person():

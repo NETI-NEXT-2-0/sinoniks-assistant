@@ -90,6 +90,14 @@ class FileLane:
             "actor_ids": sorted({actor for side in sides for actor in side.actor_ids}),
         }
 
+    def manual_method_on(self, network_id: str) -> Literal["SFTP", "unspecified"] | None:
+        methods = self.methods_on(network_id)
+        if methods["manual"] is not True:
+            return None
+        if methods["manual_protocol"] == "SFTP":
+            return "SFTP"
+        return None if methods["usb"] is True else "unspecified"
+
 
 @dataclass(frozen=True)
 class FileRule:
