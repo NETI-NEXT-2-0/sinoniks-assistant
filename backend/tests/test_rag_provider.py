@@ -424,3 +424,33 @@ async def test_full_developer_diagnostics_include_validation_reason_and_design(m
     assert diagnostics["model_response"] == raw
     assert diagnostics["issues"][0]["rule"] == "unknown_reference"
     assert "unknown-network" in diagnostics["issues"][0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_successful_insufficient_answer_has_opt_in_developer_response(monkeypatch):
+    """A valid refusal in Project mode is still observable on the local debug stand."""
+    response = {
+        "answer": "Cannot provide a full updated project", "citations": [],
+        "mode": "insufficient", "design": None,
+    }
+
+    async def model(settings, messages):
+        return {"choices": [{"finish_reason": "stop", "message": {
+            "content": json.dumps(response),
+        }}], "usage": {"prompt_tokens": 7, "completion_tokens": 9, "total_tokens": 16}}
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    base = {"database_url": "postgresql+psycopg://u:p@localhost/db"}
+    ordinary = await answer_with_provider(
+        Settings(**base), "Update existing project", [], request_mode="design",
+    )
+    assert ordinary["answer_mode"] == "insufficient"
+    assert "developer_model_response" not in ordinary
+    local = await answer_with_provider(
+        Settings(**base, developer_diagnostics_enabled=True),
+        "Update existing project", [], request_mode="design",
+    )
+    assert local["answer_mode"] == "insufficient"
+    assert "design" not in local
+    assert local["developer_model_response"] == response
+    assert local["usage"]["total_tokens"] == 16
