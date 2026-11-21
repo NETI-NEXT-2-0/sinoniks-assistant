@@ -78,6 +78,7 @@ def export_file_rule(
     purposes = sorted({flow.purpose for lane in rule.lanes for flow in lane.flows if flow.purpose})
     return {
         **rule.as_dict(), "id": number, "rule_id": rule.id, "type": "file",
+        "flow_ids": rule.flow_ids,
         "from": primary.source.network_id, "to": primary.destination.network_id,
         "mode": "two-way" if rule.direction == "both" else "one-way",
         "protocol": {key: "; ".join(sorted(value)) or None for key, value in protocols.items()},
@@ -154,8 +155,7 @@ def result_document(
     for issue in result.files.issues:
         file_issues[issue.flow_id].append(issue)
     for number, rule in enumerate(result.files.rules, len(rules) + 1):
-        flow_ids = {flow.id for lane in rule.lanes for flow in lane.flows}
-        issues = [issue for key in sorted(flow_ids) for issue in file_issues[key]]
+        issues = [issue for key in rule.flow_ids for issue in file_issues[key]]
         rules.append(export_file_rule(rule, number, nodes, issues))
     assumptions = [item.model_dump(mode="json") for item in request.assumptions]
     if placement and placement.assumed_protected_side:
