@@ -5,8 +5,9 @@ from uuid import UUID, uuid4
 
 from partner_agent.infra.errors import APIError
 from partner_agent.sinoniks_contract import SourceReference
-from partner_agent.sinoniks_contract19 import Requirements19
+from partner_agent.sinoniks_contract19 import FileFlow19, Requirements19
 from partner_agent.sinoniks_contract19_io import assess
+from partner_agent.sinoniks_data_rules import place_data_exchange
 
 
 def without_sources(value: Any) -> Any:
@@ -112,6 +113,11 @@ def requirements_questions(conditions: Requirements19) -> list[dict[str, Any]]:
                   for n, item in enumerate(conditions.systems)})
     names.update({flow.id: flow.purpose or f"Обмен {n + 1}"
                   for n, flow in enumerate(conditions.flows)})
+    placement = place_data_exchange(conditions, None)
+    nodes = (
+        {placement.node_a_network_id: "Узел А", placement.node_b_network_id: "Узел В"}
+        if placement else {}
+    )
     result = []
     for issue in assess(conditions).issues:
         segments = issue.path.split("/")
@@ -119,10 +125,21 @@ def requirements_questions(conditions: Requirements19) -> list[dict[str, Any]]:
         if len(segments) >= 3 and segments[1] in ("networks", "systems", "flows"):
             entity = getattr(conditions, segments[1])[int(segments[2])]
         label = names.get(entity.id, "") if entity else ""
+        message = issue.message
+        if isinstance(entity, FileFlow19) and len(segments) >= 5 and segments[3] == "sides":
+            side = entity.sides[int(segments[4])]
+            location = [names[side.network_id]]
+            if side.network_id in nodes:
+                location.append(nodes[side.network_id])
+            label = f"{label.rstrip('.')} ({', '.join(location)})"
+            if segments[-1] == "received_files_shared" and side.access_group:
+                message = (
+                    f"Могут ли участники группы «{side.access_group}» видеть общие файлы?"
+                )
         result.append(
             {
                 "field": issue.path,
-                "text": f"{label}: {issue.message}" if label else issue.message,
+                "text": f"{label}: {message}" if label else message,
                 "reason": issue.kind,
                 "answered_unknown": issue.answered_unknown,
                 "target_id": entity.id if entity else None,

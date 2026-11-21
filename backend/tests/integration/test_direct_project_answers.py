@@ -135,7 +135,9 @@ async def test_regenerate_reapplies_original_structured_command_without_a_provid
     no_model(monkeypatch)
     chat = await new_chat(client, headers)
     branch, base = chat["default_branch_id"], f"/api/v1/chats/{chat['id']}/designs"
-    first = (await save(client, headers, base, branch, data_project())).json()
+    document = data_project()
+    document["flows"][0]["protocol"] = None
+    first = (await save(client, headers, base, branch, document)).json()
     run = (await send_answer(client, headers, chat, first, value=None, unknown=True)).json()
     assert (await execute_run(UUID(run["run_id"]), dispatch_generation=0))["status"] == "succeeded"
     snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()

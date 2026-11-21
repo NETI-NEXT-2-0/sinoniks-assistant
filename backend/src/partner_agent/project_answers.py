@@ -67,11 +67,11 @@ def apply_answer(request: Requirements19, answer: ProjectAnswer19) -> Requiremen
     except ValueError:
         raise APIError(409, "question_context_changed", "Reload the project question") from None
     field = segments[-1]
-    parent[field] = (
-        ([] if field in ("sender_ids", "receiver_ids") else None)
-        if answer.unknown
-        else answer.value
-    )
+    empty_value: JsonValue = [] if field in ("sender_ids", "receiver_ids") else None
+    if answer.unknown and parent[field] != empty_value:
+        raise APIError(409, "question_context_changed", "The project field already has a value")
+    if not answer.unknown:
+        parent[field] = answer.value
     for collection in ("unknowns", "assumptions"):
         document[collection] = [
             note
