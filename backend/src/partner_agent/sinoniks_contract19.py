@@ -138,6 +138,10 @@ class FileFlow19(FlowBase19):
     direction: Literal["forward", "both"] | None = None
     sides: list[FileSide19] = Field(default_factory=list, max_length=2)
 
+    def has_declared_checks(self) -> bool:
+        return any(check.kind != "unsupported"
+                   for side in self.sides for check in side.checks or [])
+
 
 Flow19 = Annotated[DataFlow19 | FileFlow19, Field(discriminator="kind")]
 

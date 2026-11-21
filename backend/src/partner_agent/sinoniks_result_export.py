@@ -10,6 +10,7 @@ FILE_ISSUE_LABELS = {
     "file_direction_unknown": "Не определено направление файлового обмена",
     "file_methods_unknown": "Не заданы стороны файлового обмена",
     "file_checks_unknown": "Не уточнены файловые проверки",
+    "file_check_scope_unconfirmed": "Отдельные проверки на этой стороне не заявлены",
     "file_visibility_unknown": "Не уточнена видимость принятых файлов",
     "file_method_unknown_or_unavailable": "Не уточнён или недоступен способ передачи файлов",
     "file_automation_details_unknown": "Не уточнены протокол или хранилище файлов",
@@ -67,10 +68,9 @@ def export_file_rule(
                 labels_on_side.add("SFTP, вручную" if manual == "SFTP" else "Вручную")
             if setting is not None and setting.protocol is not None:
                 labels_on_side.add(f"{setting.protocol}, {setting.operation}")
+            supported = [check for check in (side.checks or []) if check.kind != "unsupported"]
+            labels.update(_check_label(check) for check in supported)
             if network_id in nodes:
-                supported = [check for check in (side.checks or []) if check.kind != "unsupported"]
-                if side.checks is not None:
-                    labels.update(_check_label(check) for check in supported)
                 checks[nodes[network_id]] = (
                     None if side.checks is None else
                     [check.model_dump(mode="json") for check in supported]

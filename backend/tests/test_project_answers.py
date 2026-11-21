@@ -122,6 +122,9 @@ def test_manual_file_questions_keep_the_known_sender_and_identify_the_receiving_
         checks=[{"kind": "signature"}], manual_protocol=None if usb else "SFTP",
     )
     destination.update(checks=None, received_files_shared=None, access_group="operations")
+    document["unknowns"] = [
+        {"path": "/flows/0/sides/0/checks", "reason": "missing", "target_id": flow["id"]},
+    ]
     request = Requirements19.model_validate(document)
     questions = {question["field"]: question for question in question_choices(request)}
     assert set(questions) == {

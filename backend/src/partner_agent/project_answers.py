@@ -17,7 +17,8 @@ PATH = re.compile(
     rf"^/(?:networks/{INDEX}/(?:name|trust)|systems/{INDEX}/(?:name|network_id)|"
     rf"flows/{INDEX}/(?:purpose|policy|mode|protocol|destination_port|sender_network_id|"
     rf"receiver_network_id|direction|sender_ids|receiver_ids|sides/{INDEX}/(?:manual|usb|"
-    rf"manual_protocol|checks|received_files_shared|access_group|automations/{INDEX}/"
+    rf"manual_protocol|checks(?:/{INDEX}/details)?|received_files_shared|access_group|"
+    rf"automations/{INDEX}/"
     r"(?:protocol|storage_id)))|manual_users|protected_network_id)$"
 )
 

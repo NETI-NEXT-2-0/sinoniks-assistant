@@ -184,7 +184,10 @@ def _method_present(side: FileSide19, automations: list[Automatic19]) -> bool:
     return bool(automations) or side.manual is True or side.usb is True
 
 
-def _lanes(flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str]) -> tuple[
+def _lanes(
+    flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str],
+    explicit_check_gaps: set[str],
+) -> tuple[
     list[FileLane], list[FileIssue],
 ]:
     if flow.sender_network_id is None or flow.receiver_network_id is None or flow.direction is None:
@@ -213,7 +216,9 @@ def _lanes(flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str]) 
         issues.append(FileIssue(flow.id, "automation_conflicts_with_file_direction"))
     for side in sides.values():
         if side.checks is None:
-            issues.append(FileIssue(flow.id, "file_checks_unknown", side.network_id))
+            reason = ("file_check_scope_unconfirmed" if flow.has_declared_checks()
+                      and side.network_id not in explicit_check_gaps else "file_checks_unknown")
+            issues.append(FileIssue(flow.id, reason, side.network_id))
         elif any(check.kind == "unsupported" for check in side.checks):
             issues.append(FileIssue(flow.id, "unsupported_file_check", side.network_id))
         if side.usb is True and side.network_id != outside_network_id:
@@ -362,8 +367,14 @@ def calculate_file_rules(
     issues = []
     buckets: dict[Profile, list[FileLane]] = defaultdict(list)
     usb_ids = {system.id for system in request.systems if system.kind == "usb"}
+    documented_gaps = {note.path for note in request.unknowns}
+    check_gaps = {
+        flow.id: {side.network_id for side_index, side in enumerate(flow.sides)
+                  if f"/flows/{flow_index}/sides/{side_index}/checks" in documented_gaps}
+        for flow_index, flow in enumerate(request.flows) if isinstance(flow, FileFlow19)
+    }
     for flow in flows:
-        lanes, current_issues = _lanes(flow, outside_network_id, usb_ids)
+        lanes, current_issues = _lanes(flow, outside_network_id, usb_ids, check_gaps[flow.id])
         issues.extend(current_issues)
         for lane in lanes:
             buckets[_profile(lane)].append(lane)

@@ -78,7 +78,11 @@ def test_f04_manual_sftp_and_smb_push_need_one_known_user():
         side("plant", automations=[automation("PUSH", "plant", "SMB")]),
         sender_ids=["office-store"], receiver_ids=["plant-store"],
     )])
-    assert assess(request).status == "ready_for_solver"
+    assessment = assess(request)
+    assert assessment.status == "needs_clarification"
+    assert [issue.path for issue in assessment.issues] == [
+        "/flows/0/sides/0/checks/0/details", "/flows/0/sides/0/checks/1/details",
+    ]
     expert = export_result(request, session_id="test-f04")
     assert expert["status"] == "completed"
     assert expert["rules_count"] == expert["file_users_count"] == 1
