@@ -145,3 +145,16 @@
 .chat-layout .chat-input-row { padding: 0; }
 .chat-layout .chat-input-row textarea { min-height: 24px; line-height: 24px; padding: 0 4px; }
 .chat-layout .chat-input-row .send { margin: 0; width: 36px; height: 36px; }
+
+/* Compact source pills; opening a source retains its complete title and access checks. */
+.message-sources{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;margin-top:12px}
+.message-sources .answer-source{padding:0;border:0;margin:0;max-width:100%;min-width:0}
+.message-sources .answer-source summary.source-chip{display:flex;align-items:center;gap:6px;min-height:32px;max-width:250px;padding:5px 10px;border:1px solid var(--stroke);border-radius:999px;background:transparent;font-size:12px;line-height:1.5;color:var(--secondary)}
+.message-sources .source-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.message-sources .source-chip svg{width:13px;height:13px;flex:none}
+.message-sources .answer-source summary::after{display:none}
+.message-sources .answer-source[open]{flex-basis:100%;padding-bottom:12px}
+.message-sources .answer-source[open] summary.source-chip{max-width:100%;color:var(--ink);border-color:var(--accent-text)}
+.message-sources .answer-source[open] summary.source-chip span{white-space:normal}
+.message-sources .answer-source summary:hover{color:var(--ink);background:var(--panel)}
+@media(pointer:coarse){.message-sources .answer-source summary.source-chip{min-height:44px}}

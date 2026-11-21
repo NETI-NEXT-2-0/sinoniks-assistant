@@ -70,7 +70,8 @@ def test_saved_diagram_side_mapping_uses_placement_not_network_list_order():
         project_calculation=summary,
         request_mode="reference",
     )
-    assert '"right":' not in reference.messages[-1]["content"]
+    assert '"right":' in reference.messages[-1]["content"]
+    assert "Read-only saved project conditions:" in reference.messages[-1]["content"]
 
 
 def test_latest_clarification_survives_a_full_evidence_window():

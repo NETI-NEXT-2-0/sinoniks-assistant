@@ -33,6 +33,7 @@ function SourceFragment({ auth, runId, index, citation, onExpired }: {
     } catch (failure) { failed(failure); }
     finally { if (live.current) setBusy(false); }
   }
+  useEffect(() => { void open(); }, []);
   async function download(): Promise<void> {
     if (!source?.original_download_path) return;
     setBusy(true); setError('');
@@ -62,7 +63,7 @@ function Citation({ citation, index, auth, runId, onExpired }: {
   const [open, setOpen] = useState(false);
   const source = readWebSource(citation.web_source);
   return <details className="answer-source" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary className="source-chip"><Icon name="doc" />{citation.title ?? `Источник ${index + 1}`}</summary>
+    <summary className="source-chip"><Icon name="doc" /><span title={citation.title}>{(citation.title ?? `Источник ${index + 1}`).replace(/^Проверенная редакция\s*·\s*/, '').replace(/^Материалы партнёра\s*·\s*/, '')}</span></summary>
     <blockquote>{citation.quote}</blockquote>
     {(citation.location || source) && <div className="answer-source-origin">
       {citation.location && <span>{citation.location}</span>}

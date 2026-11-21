@@ -24,6 +24,7 @@ from partner_agent.chats.files import router as chat_files_router
 from partner_agent.chats.routes import router as chats_router
 from partner_agent.design_routes import router as design_router
 from partner_agent.documents.routes import router as documents_router
+from partner_agent.feedback_routes import router as feedback_router
 from partner_agent.infra.db import get_engine
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.settings import get_settings
@@ -55,6 +56,7 @@ app.include_router(documents_router)
 app.include_router(design_router)
 app.include_router(web_router)
 app.include_router(accounting_router)
+app.include_router(feedback_router)
 app.include_router(answer_sources_router)
 app.include_router(vendor_wish_router)
 
