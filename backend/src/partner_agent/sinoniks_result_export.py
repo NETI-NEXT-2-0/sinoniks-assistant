@@ -4,7 +4,21 @@ from dataclasses import asdict
 from partner_agent.sinoniks_calculation import RuleCalculation, solve_project
 from partner_agent.sinoniks_contract19 import FileCheck19, FileFlow19, Requirements19
 from partner_agent.sinoniks_data_rules import DataRule
-from partner_agent.sinoniks_file_rules import FileRule
+from partner_agent.sinoniks_file_rules import FileIssue, FileRule
+
+FILE_ISSUE_LABELS = {
+    "file_direction_unknown": "Не определено направление файлового обмена",
+    "file_methods_unknown": "Не заданы стороны файлового обмена",
+    "file_checks_unknown": "Не уточнены файловые проверки",
+    "file_visibility_unknown": "Не уточнена видимость принятых файлов",
+    "file_method_unknown_or_unavailable": "Не уточнён или недоступен способ передачи файлов",
+    "file_automation_details_unknown": "Не уточнены протокол или хранилище файлов",
+    "file_automation_pairing_unknown": "Не определено соответствие автоматических операций",
+    "automation_conflicts_with_file_direction": "Автоматизация противоречит направлению обмена",
+    "usb_conflicts_with_file_method": "Подключение USB противоречит указанному методу",
+    "usb_requires_node_a": "USB должен подключаться на стороне Узла А",
+    "unsupported_file_check": "Запрошенная проверка не поддерживается продуктом",
+}
 
 
 def export_data_rule(rule: DataRule, number: int) -> dict[str, object]:
@@ -34,7 +48,7 @@ def _check_label(check: FileCheck19) -> str:
 
 
 def export_file_rule(
-    rule: FileRule, number: int, nodes: dict[str, str],
+    rule: FileRule, number: int, nodes: dict[str, str], issues: list[FileIssue],
 ) -> dict[str, object]:
     primary = rule.primary_lane
     protocols: dict[str, set[str]] = defaultdict(set)
@@ -70,6 +84,32 @@ def export_file_rule(
         "port": None, "description": "; ".join(purposes) or "Передача файлов",
         "checks": sorted(labels), "checks_by_node": checks,
         "provisional": any(lane.provisional for lane in rule.lanes),
+        "provisional_reasons": [
+            {**asdict(issue), "label": FILE_ISSUE_LABELS[issue.reason]} for issue in issues
+        ],
+    }
+
+
+def _file_users(request: Requirements19, result: RuleCalculation) -> dict[str, object]:
+    files = result.files
+    details = files.user_details
+    actors = {actor.id: actor.name for actor in request.actors}
+    pulls = [
+        {
+            "rule_id": rule.id, "network_id": lane.source.network_id,
+            "storage_id": lane.pull.storage_id, "protocol": lane.pull.protocol,
+            "flow_ids": sorted(flow.id for flow in lane.flows),
+        }
+        for rule in files.rules for lane in rule.lanes if lane.pull is not None
+    ]
+    return {
+        "manual": {
+            "min": details.manual_lower, "max": details.manual_upper,
+            "actors": [{"id": key, "name": actors[key]} for key in details.actor_ids],
+        },
+        "technical_pull_count": files.declared_pulls,
+        "technical_pulls": pulls,
+        "upper_unknown_reasons": list(details.upper_unknown_reasons),
     }
 
 
@@ -110,8 +150,13 @@ def result_document(
         placement.node_a_network_id: "A", placement.node_b_network_id: "B",
     }
     rules = [export_data_rule(rule, number) for number, rule in enumerate(result.data.rules, 1)]
+    file_issues: dict[str, list[FileIssue]] = defaultdict(list)
+    for issue in result.files.issues:
+        file_issues[issue.flow_id].append(issue)
     for number, rule in enumerate(result.files.rules, len(rules) + 1):
-        rules.append(export_file_rule(rule, number, nodes))
+        flow_ids = {flow.id for lane in rule.lanes for flow in lane.flows}
+        issues = [issue for key in sorted(flow_ids) for issue in file_issues[key]]
+        rules.append(export_file_rule(rule, number, nodes, issues))
     assumptions = [item.model_dump(mode="json") for item in request.assumptions]
     if placement and placement.assumed_protected_side:
         assumptions.append({
@@ -150,11 +195,15 @@ def result_document(
             "node_b_network_id": placement.node_b_network_id,
         },
         "rules": rules, "rules_count": len(rules), "rules_lower_bound": result.lower_bound,
+        "rules_lower_bound_breakdown": {
+            "data": result.data.confirmed_network_lower_bound, "file": result.files.lower_bound,
+        },
         "confirmed_rules_count": result.minimum, "capacity_exceeded": result.capacity_exceeded,
         "file_users_count": result.files.file_users_count,
         "file_users_range": None if users_range is None else {
             "min": users_range.lower, "max": users_range.upper,
         },
+        "file_users_breakdown": _file_users(request, result),
         "devices": [
             {"id": system.id, "network_id": system.network_id, "name": system.name,
              "kind": system.kind,

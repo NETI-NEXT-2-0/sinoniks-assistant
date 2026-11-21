@@ -127,6 +127,14 @@ class FileRule:
 
 
 @dataclass(frozen=True)
+class FileUserDetails:
+    actor_ids: tuple[str, ...]
+    manual_lower: int
+    manual_upper: int | None
+    upper_unknown_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class FileCalculation:
     rules: list[FileRule]
     issues: list[FileIssue]
@@ -135,6 +143,7 @@ class FileCalculation:
     declared_pulls: int
     file_users_count: int | None
     file_users_range: CountRange19 | None
+    user_details: FileUserDetails
 
 
 def _settings(side: FileSide19, operation: str) -> list[Automatic19]:
@@ -315,19 +324,30 @@ def has_unidentified_manual_users(flows: Iterable[FileFlow19]) -> bool:
 
 def _user_counts(
     request: Requirements19, flows: list[FileFlow19], pulls: int, incomplete: bool,
-) -> tuple[int | None, CountRange19 | None]:
+) -> tuple[int | None, CountRange19 | None, FileUserDetails]:
+    actors = tuple(sorted({
+        actor for flow in flows for side in flow.sides for actor in side.actor_ids
+    }))
     if not flows:
-        return 0, None
-    actors = {actor for flow in flows for side in flow.sides for actor in side.actor_ids}
+        return 0, None, FileUserDetails(actors, 0, 0, ())
     declared = request.manual_users
-    lower = max(len(actors), declared.lower if declared else 0) + pulls
-    upper = None if incomplete else (
-        declared.upper + pulls if declared and declared.upper is not None
-        else lower if declared is None and not has_unidentified_manual_users(flows) else None
-    )
+    manual_lower = max(len(actors), declared.lower if declared else 0)
+    if declared is not None:
+        manual_upper = declared.upper
+    else:
+        manual_upper = None if has_unidentified_manual_users(flows) else manual_lower
+    reasons = []
+    if manual_upper is None:
+        reasons.append("manual_upper_unknown")
+    if incomplete:
+        reasons.append("file_rules_incomplete")
+    details = FileUserDetails(actors, manual_lower, manual_upper, tuple(reasons))
+    lower = manual_lower + pulls
+    upper = manual_upper + pulls if manual_upper is not None and not incomplete else None
     if upper == lower:
-        return lower, None
-    return None, CountRange19(lower=lower, upper=upper) if lower or upper is not None else None
+        return lower, None, details
+    interval = CountRange19(lower=lower, upper=upper) if lower or upper is not None else None
+    return None, interval, details
 
 
 def calculate_file_rules(
@@ -355,8 +375,8 @@ def calculate_file_rules(
         rules.append(FileRule(f"file-{digest}", group))
     pulls = sum(lane.pull is not None for group in matched for lane in group)
     lower_bound = max(int(bool(flows)), sum(not group[0].provisional for group in matched))
-    users, user_range = _user_counts(request, flows, pulls, bool(issues))
+    users, user_range, user_details = _user_counts(request, flows, pulls, bool(issues))
     return FileCalculation(
         rules, list(dict.fromkeys(issues)), None if issues else len(rules),
-        lower_bound, pulls, users, user_range,
+        lower_bound, pulls, users, user_range, user_details,
     )
