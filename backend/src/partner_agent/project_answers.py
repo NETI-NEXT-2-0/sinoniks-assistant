@@ -18,7 +18,7 @@ PATH = re.compile(
     rf"flows/{INDEX}/(?:purpose|policy|mode|protocol|destination_port|sender_network_id|"
     rf"receiver_network_id|direction|sender_ids|receiver_ids|sides/{INDEX}/(?:manual|usb|"
     rf"manual_protocol|checks|received_files_shared|access_group|automations/{INDEX}/"
-    r"(?:protocol|storage_id)))|manual_users)$"
+    r"(?:protocol|storage_id)))|manual_users|protected_network_id)$"
 )
 
 
@@ -39,7 +39,7 @@ class ProjectAnswer19(StrictModel):
             raise ValueError("Answer exceeds the structured value limit")
         if self.unknown and self.value is not None:
             raise ValueError("An unknown answer has no supplied value")
-        root = self.path == "/manual_users"
+        root = self.path in ("/manual_users", "/protected_network_id")
         if root != (self.target_id is None):
             raise ValueError("Bind this answer to its stable entity ID")
         if ("/sides/" in self.path) != (self.side_network_id is not None):
@@ -49,6 +49,8 @@ class ProjectAnswer19(StrictModel):
 
 def apply_answer(request: Requirements19, answer: ProjectAnswer19) -> Requirements19:
     document = request.model_dump(mode="json")
+    if answer.path == "/protected_network_id":
+        document.setdefault("protected_network_id", None)
     segments = answer.path.split("/")
     try:
         if answer.target_id is not None:
@@ -112,6 +114,9 @@ def question_choices(request: Requirements19) -> list[dict[str, Any]]:
             values: list[tuple[str, Any]] = []
             if field == "trust":
                 values = [("Открытая", "open"), ("Закрытая, защищаемая", "closed")]
+            elif field == "protected_network_id":
+                values = [(f"Считать «{network.name or network.id}» защищаемой", network.id)
+                          for network in request.networks]
             elif field == "mode":
                 values = [("Только в одну сторону", "one-way"), ("С ответом", "two-way")]
                 flow = cast(

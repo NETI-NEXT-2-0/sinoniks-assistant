@@ -5,9 +5,17 @@ No trust, protocol, port, file method or rule minimum is inferred here.
 """
 
 from collections.abc import Container
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import AfterValidator, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    SerializerFunctionWrapHandler,
+    StringConstraints,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from partner_agent.sinoniks_contract import Identifier, Protocol, SourceReference, StrictModel
 
@@ -25,6 +33,8 @@ Text19 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, m
 Name19 = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
                    AfterValidator(_printable)]
 Port19 = Annotated[int, Field(strict=True, ge=1, le=65535)]
+NOTE_PATH = (r"^/(protected_network_id|"
+             r"(networks|systems|flows|manual_users)(/[^/]+)*)$")
 
 
 class Network19(StrictModel):
@@ -133,13 +143,13 @@ Flow19 = Annotated[DataFlow19 | FileFlow19, Field(discriminator="kind")]
 
 
 class Unknown19(StrictModel):
-    path: str = Field(pattern=r"^/(networks|systems|flows|manual_users)(/[^/]+)*$", max_length=300)
+    path: str = Field(pattern=NOTE_PATH, max_length=300)
     reason: Literal["missing", "user_unknown"]
     target_id: Identifier | None = None
 
 
 class Assumption19(StrictModel):
-    path: str = Field(pattern=r"^/(networks|systems|flows|manual_users)(/[^/]+)*$", max_length=300)
+    path: str = Field(pattern=NOTE_PATH, max_length=300)
     target_id: Identifier | None = None
     explanation: Text19
     basis: Literal["product_fact", "user_minimum"]
@@ -189,6 +199,18 @@ class Requirements19(StrictModel):
     assumptions: list[Assumption19] = Field(default_factory=list, max_length=256)
     requests_for_vendor: list[VendorRequest19] = Field(default_factory=list, max_length=256)
     legacy: LegacyContext19 | None = None
+    protected_network_id: Identifier | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        document = cast(dict[str, Any], handler(self))
+        notes: list[Unknown19 | Assumption19] = [*self.unknowns, *self.assumptions]
+        # Preserve old command hashes. A new root note must still point to a serialized value.
+        if self.protected_network_id is None and not any(
+            note.path == "/protected_network_id" for note in notes
+        ):
+            document.pop("protected_network_id", None)
+        return document
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -217,6 +239,7 @@ class Requirements19(StrictModel):
                 raise ValueError("Duplicate reference")
 
         manual_actors: set[str] = set()
+        reference(self.protected_network_id, networks)
         for system in self.systems:
             reference(system.network_id, networks)
         for flow in self.flows:

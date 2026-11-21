@@ -59,6 +59,7 @@ def bind_requirements(
             "storage_id",
             "flow_id",
             "target_id",
+            "protected_network_id",
         }
         list_refs = {"sender_ids", "receiver_ids", "actor_ids"}
 
@@ -93,7 +94,13 @@ def bind_requirements(
                 if trusted_import
                 else []
             )
-            if prior is None or without_sources(item) != without_sources(prior):
+            choice_changed = previous is not None and (
+                previous.protected_network_id != document.get("protected_network_id")
+            )
+            chosen = {document.get("protected_network_id"),
+                      previous.protected_network_id if previous else None}
+            if (prior is None or without_sources(item) != without_sources(prior)
+                or (name == "networks" and choice_changed and item["id"] in chosen)):
                 item["sources"] = [*item["sources"], source][-20:]
     return Requirements19.model_validate(document)
 

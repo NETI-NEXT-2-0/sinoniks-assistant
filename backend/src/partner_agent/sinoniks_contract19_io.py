@@ -123,6 +123,12 @@ def assess(request: Requirements19) -> Assessment19:
     trusts = [network.trust for network in request.networks]
     if trusts.count("closed") == 2:
         issue("/networks", "Уточните, какая сеть защищаемая относительно другой.", "conflict")
+    if len(trusts) == 2 and trusts.count("open") == 2 and request.protected_network_id is None:
+        issue("/protected_network_id", "Какую открытую сеть считать защищаемой в этом проекте?")
+    closed = [network.id for network in request.networks if network.trust == "closed"]
+    if len(closed) == 1 and request.protected_network_id not in (None, closed[0]):
+        issue("/protected_network_id", "Выбор стороны противоречит закрытой сети. Уточните его.",
+              "conflict")
     for index, network in enumerate(request.networks):
         for field in ("name", "trust"):
             if getattr(network, field) is None:
@@ -132,14 +138,17 @@ def assess(request: Requirements19) -> Assessment19:
             issue(f"/systems/{index}/network_id", "К какой сети относится система?")
     for index, flow in enumerate(request.flows):
         root = f"/flows/{index}"
-        for field in ("sender_network_id", "receiver_network_id", "purpose", "sender_ids"):
+        for field in ("sender_network_id", "receiver_network_id", "sender_ids"):
             if getattr(flow, field) in (None, []):
-                issue(root + "/" + field, "Уточните участников, направление и назначение потока.")
+                issue(root + "/" + field, "Уточните участников и направление потока.")
         if not flow.receiver_ids and not (
             isinstance(flow, DataFlow19) and flow.application == "ntp"
         ):
             issue(root + "/receiver_ids", "Какая система принимает поток?")
         if isinstance(flow, DataFlow19):
+            if flow.destination_port is None and flow.application != "ntp":
+                issue(root + "/destination_port", "Какой порт используется, если он известен?",
+                      "optional")
             for field in ("mode", "protocol"):
                 known_fact = flow.application == "ntp" or (
                     field == "mode" and flow.protocol in {"MQTT", "Modbus TCP", "МЭК 104"}

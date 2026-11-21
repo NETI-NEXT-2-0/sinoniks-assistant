@@ -9,6 +9,47 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def incomplete_scenario(proposal: dict, question: str) -> None:
+    """Fixed synthetic cases only; this is not free-text extraction or a product fallback."""
+    if "Синтетические две открытые сети" in question:
+        for network in proposal["networks"]:
+            network["trust"] = "open"
+    if "Синтетические три сети" in question:
+        proposal["networks"].append({"id": "third", "name": "Третья сеть", "trust": "open"})
+    if "Синтетический смешанный" in question:
+        proposal["requests_for_vendor"] = [{"id": "wish-mixed", "kind": "unsupported",
+                                            "text": "Нужен встроенный антивирус"}]
+    if "Синтетический N01" in question or "Синтетический N05" in question:
+        outer, inner = (network["id"] for network in proposal["networks"])
+        files = next((flow for flow in proposal["flows"] if flow["kind"] == "file"), None)
+        if files is None:
+            files = {"id": "updates", "kind": "file", "sender_network_id": outer,
+                     "receiver_network_id": inner, "sender_ids": [], "receiver_ids": [],
+                     "purpose": "Обновления", "direction": "forward",
+                     "sides": [{"network_id": outer}, {"network_id": inner}]}
+            proposal["flows"].append(files)
+        if "Синтетический N01" in question:
+            files["direction"] = "both"
+            proposal["flows"] = [files]
+        if "подробности" in question:
+            proposal["systems"].extend([
+                {"id": "usb-n05", "name": "USB-обновления", "kind": "usb",
+                 "attachment": "node-A", "network_id": None},
+                {"id": "store-n05", "name": "Хранилище", "kind": "storage", "network_id": inner},
+            ])
+            proposal["actors"] = [{"id": "operator-n05", "name": "Сотрудник"}]
+            proposal["manual_users"] = {"lower": 1, "upper": 1}
+            files.update(sender_ids=["usb-n05"], receiver_ids=["store-n05"], sides=[
+                {"network_id": outer, "manual": False, "usb": True,
+                 "actor_ids": ["operator-n05"], "received_files_shared": True,
+                 "checks": [{"kind": "icap", "icap_service": "antivirus"}]},
+                {"network_id": inner, "manual": False, "usb": False, "checks": [],
+                 "received_files_shared": True,
+                 "automations": [{"operation": "PUSH", "protocol": "SMB",
+                                  "storage_id": "store-n05"}]},
+            ])
+
+
 def fixture_body(messages: list[dict] | None = None) -> dict:
     flow = {
         "sender_side": "A",
@@ -60,8 +101,9 @@ def fixture_body(messages: list[dict] | None = None) -> dict:
                     "purpose": "Журналы",
                 }
             ]
-        for network in proposal["networks"]:
-            network["trust"] = "open" if network["name"] == "Офис" else "closed"
+        if not all(network["trust"] == "open" for network in proposal["networks"]):
+            for network in proposal["networks"]:
+                network["trust"] = "open" if network["name"] == "Офис" else "closed"
         for exchange in proposal["flows"]:
             if exchange["kind"] == "data":
                 exchange["protocol"] = (
@@ -70,6 +112,7 @@ def fixture_body(messages: list[dict] | None = None) -> dict:
                     in messages[-1]["content"].split("Evidence:", 1)[0]
                     else "UDP"
                 )
+        incomplete_scenario(proposal, messages[-1]["content"].split("Evidence:", 1)[0])
     mode = (
         "project_explanation"
         if requirements

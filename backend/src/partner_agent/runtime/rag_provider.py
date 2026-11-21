@@ -182,6 +182,12 @@ def prepare_request(
             "Never invent known values. "
             "New entities need unique temporary IDs and valid references; the server assigns "
             "their permanent IDs. Return no sources anywhere. Never alter legacy metadata. "
+            "Optional protected_network_id:null|string records an explicitly agreed protected "
+            "side when both networks are open. Never relabel an open network as closed. "
+            "Never invent this choice: leave it absent/null until the user chooses; it is a "
+            "project assumption, not a change of trust. A root unknown uses target_id=null. "
+            "For mixed supported/unsupported requests, preserve supported flows in the design "
+            "and record the unsupported request in requests_for_vendor; do not discard valid work. "
             "Networks: {id,name:null|string,trust:null|'open'|'closed'}. Systems: "
             "{id,name,network_id,kind:'system'|'storage'|'usb',attachment:null|'node-A'}. "
             "USB has network_id=null and attachment=node-A; no data stream may use USB. "
@@ -400,9 +406,19 @@ async def answer_with_provider(
             if not isinstance(proposal, dict):
                 raise ProviderError("provider_invalid_design")
             if request.input_version == 3:
-                conditions = Requirements19.model_validate(proposal)
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
+                try:
+                    conditions = Requirements19.model_validate(proposal)
+                except ValidationError as invalid:
+                    errors = invalid.errors(include_input=False)
+                    if not errors or any(error["loc"] != ("networks",)
+                                         or error["type"] != "too_long" for error in errors):
+                        raise
+                    # A scope clarification, not a silently truncated graph or another paid call.
+                    mode = "insufficient"
+                    validated = {"answer": "В этом проекте можно связать две сети через одну "
+                                 "границу. Какую пару выбрать для первой схемы?", "citations": []}
             else:
                 conditions = DesignInput.model_validate(proposal)
             if isinstance(conditions, DesignInput) and any(

@@ -69,6 +69,11 @@ class DataCalculation:
 def place_data_exchange(
     request: Requirements19, protected_network_id: str | None,
 ) -> DataPlacement | None:
+    if (protected_network_id is not None and request.protected_network_id is not None
+        and protected_network_id != request.protected_network_id):
+        return None
+    if protected_network_id is None:
+        protected_network_id = request.protected_network_id
     if len(request.networks) != 2:
         return None
     networks = {network.id: network.trust for network in request.networks}

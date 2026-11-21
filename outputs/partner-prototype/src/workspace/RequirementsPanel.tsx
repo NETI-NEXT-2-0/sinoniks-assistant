@@ -401,6 +401,22 @@ export function RequirementsPanel({
                 </div>
               </fieldset>
             ))}
+            {((input.networks.length === 2 && input.networks.every(network => network.trust === "open")) || input.protected_network_id) && (
+              <fieldset disabled={disabled}>
+                <legend>Защищаемая сторона проекта</legend>
+                <p>Выбор стороны — допущение проекта. Фактическое доверие сетей не меняется.</p>
+                <label>
+                  Считать защищаемой
+                  <select value={input.protected_network_id ?? ""} onChange={event => change(
+                    { ...input, protected_network_id: event.target.value || null }, "/protected_network_id",
+                  )}>
+                    <option value="">Не согласована</option>
+                    {input.networks.map(network => <option key={network.id} value={network.id}>{network.name || network.id}</option>)}
+                  </select>
+                </label>
+                {input.unknowns?.some(note => note.path === "/protected_network_id" && note.reason === "user_unknown") && <p>Ответ «не знаю» сохранён. Защищаемая сторона пока не согласована.</p>}
+              </fieldset>
+            )}
             <fieldset disabled={disabled}>
               <legend>Системы и хранилища</legend>
               {input.systems.map((system, index) => (
