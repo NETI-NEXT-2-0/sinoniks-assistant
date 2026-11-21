@@ -70,6 +70,11 @@ with sync_playwright() as driver:
         fragment = citation.get_by_role("region", name="Актуальный фрагмент источника")
         expect(fragment).to_be_visible()
         expect(fragment).to_contain_text("9. Контрольный раздел")
+        for width in (320, 390):
+            page.set_viewport_size({"width": width, "height": 844})
+            expect(fragment).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.set_viewport_size({"width": 1440, "height": 1000})
         assert citation.get_by_role("button", name="Скачать оригинал", exact=True).count() == 0
         grant(True, True)
         citation.get_by_role("button", name="Обновить фрагмент", exact=True).click()

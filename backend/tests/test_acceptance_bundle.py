@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from partner_agent.acceptance_bundle import artifact, collect, main, prepare
+from partner_agent.acceptance_bundle import BASE_CASES, artifact, collect, main, prepare
 
 SHA = "b" * 40
 ROUTE = {"model_id": "qwen/qwen3-30b-a3b-instruct-2507", "provider_variant": "dekallm",
@@ -199,3 +199,55 @@ def test_cli_refuses_to_overwrite_existing_evidence(tmp_path):
     assert main(args) == 0
     original = (output / "captures.json").read_bytes()
     assert main(args) == 2 and (output / "captures.json").read_bytes() == original
+
+
+def benchmark(tmp_path):
+    path = tmp_path / "private-benchmark.json"
+    rows = [{"id": name, "query": "Synthetic input " + name,
+             "expected": {"rules_count": 987654}, "explanation": "DO_NOT_COPY_ORACLE",
+             "expected_behavior": "DO_NOT_COPY_ORACLE", "must_ask": ["DO_NOT_COPY_ORACLE"]}
+            for name in sorted(BASE_CASES)]
+    next(row for row in rows if row["id"] == "N05")["follow_up"] = {
+        "user_answer": "Synthetic additional user facts", "expected": "DO_NOT_COPY_ORACLE",
+    }
+    write(path, {"items": rows, "scoring_note": "DO_NOT_COPY_ORACLE"})
+    return path
+
+
+def test_private_input_pack_never_copies_expected_answers_or_explanations(tmp_path):
+    source = benchmark(tmp_path)
+    raw = source.read_bytes()
+    folder = tmp_path / "run"
+    plan = prepare(folder, SHA, {"routes": [ROUTE]}, benchmark=source)
+    inputs = json.loads((folder / "inputs.json").read_text())
+    assert len(inputs["inputs"]) == 10
+    assert inputs["inputs"][-1]["case_id"] in BASE_CASES
+    followup = next(row for row in inputs["inputs"] if row["phase"] == "follow_up")
+    assert followup == {"case_id": "N05", "phase": "follow_up",
+                        "text": "Synthetic additional user facts"}
+    all_outputs = "\n".join(path.read_text() for path in folder.iterdir())
+    assert "DO_NOT_COPY_ORACLE" not in all_outputs
+    assert "987654" not in (folder / "inputs.json").read_text()
+    assert source.read_bytes() == raw
+    assert len(plan["benchmark_sha256"]) == len(plan["input_prompts_sha256"]) == 64
+    with (folder / "inputs.json").open("a") as handle:
+        handle.write(" ")
+    assert "input_pack_changed" in report(folder)["issues"]
+
+
+@pytest.mark.parametrize("change", ["missing", "duplicate", "query", "follow_up"])
+def test_bad_inputs_are_not_recovered_from_the_answer_key(tmp_path, change):
+    path = benchmark(tmp_path)
+    data = json.loads(path.read_text())
+    if change == "missing":
+        data["items"].pop()
+    elif change == "duplicate":
+        data["items"][0]["id"] = data["items"][1]["id"]
+    elif change == "query":
+        data["items"][0].pop("query")
+    else:
+        next(row for row in data["items"] if row["id"] == "N05")["follow_up"].pop("user_answer")
+    write(path, data)
+    with pytest.raises(ValueError):
+        prepare(tmp_path / "run", SHA, {"routes": [ROUTE]}, benchmark=path)
+    assert not (tmp_path / "run").exists()

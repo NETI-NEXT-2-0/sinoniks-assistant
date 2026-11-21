@@ -25,6 +25,7 @@ PROJECT_CASES = frozenset({"F01", "F02", "F04", "F07", "N01", "N05", "U01",
                            "U02-separate", "U02-shared", "U03", "U04-open", "U05", "U06"})
 ROUTE_KEYS = {"model_id", "provider_variant", "snapshot", "input_usd_per_million",
               "output_usd_per_million", "context_window_tokens", "max_output_tokens"}
+BASE_CASES = frozenset({"F01", "F02", "F04", "F07", "N01", "N05", "O01", "Q01", "Q10"})
 
 
 def money(value: Any) -> Decimal:
@@ -75,7 +76,34 @@ def routes_from(value: Any) -> list[dict[str, Any]]:
     return routes
 
 
-def prepare(output: Path, git_sha: str, config: Any) -> dict[str, Any]:
+def benchmark_inputs(path: Path) -> tuple[dict[str, Any], str]:
+    data, digest = read_json(path)
+    if (not isinstance(data, dict) or not isinstance(data.get("items"), list)
+            or len(data["items"]) != len(BASE_CASES)):
+        raise ValueError("Expected the nine open benchmark inputs")
+    inputs = []
+    seen: set[str] = set()
+    for row in data["items"]:
+        if (not isinstance(row, dict) or not isinstance(row.get("id"), str)
+                or row["id"] not in BASE_CASES or row["id"] in seen):
+            raise ValueError("Unexpected or duplicate input case")
+        seen.add(row["id"])
+        phases = [("initial", row.get("query"))]
+        if row.get("follow_up") is not None:
+            if not isinstance(row["follow_up"], dict):
+                raise ValueError("Invalid follow-up input")
+            phases.append(("follow_up", row["follow_up"].get("user_answer")))
+        for phase, content in phases:
+            if (not isinstance(content, str) or not content.strip() or "\x00" in content
+                    or len(content.encode("utf-8")) > 32768):
+                raise ValueError("Missing or oversized user input; never infer from expected")
+            inputs.append({"case_id": row["id"], "phase": phase, "text": content})
+    return {"schema_version": 1, "inputs": inputs}, digest
+
+
+def prepare(
+    output: Path, git_sha: str, config: Any, *, benchmark: Path | None = None,
+) -> dict[str, Any]:
     if not SHA.fullmatch(git_sha) or output.exists():
         raise ValueError("Supply a full SHA and a new output directory")
     routes = routes_from(config)
@@ -95,6 +123,13 @@ def prepare(output: Path, git_sha: str, config: Any) -> dict[str, Any]:
          "expert": None, "drawio": None} for name, _ in SESSION_PLAN
     ]}
     contents = {"plan.json": plan, "captures.json": records}
+    if benchmark is not None:
+        inputs, source_hash = benchmark_inputs(benchmark)
+        contents["inputs.json"] = inputs
+        text = json.dumps(inputs, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        encoded = text.encode("utf-8")
+        plan["benchmark_sha256"] = source_hash
+        plan["input_prompts_sha256"] = hashlib.sha256(encoded).hexdigest()
     output.mkdir(parents=True)
     for name, content in contents.items():
         with (output / name).open("x", encoding="utf-8") as handle:
@@ -144,6 +179,13 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
             raise ValueError("Invalid review status")
         by_case[row["case_id"]] = row
     issues = [f"{case}:missing_capture" for case in sorted(known_cases - by_case.keys())]
+    if plan.get("input_prompts_sha256") is not None:
+        try:
+            _, _, digest = artifact(plan_path.parent, "inputs.json")
+            if digest != plan["input_prompts_sha256"]:
+                issues.append("input_pack_changed")
+        except (OSError, ValueError):
+            issues.append("input_pack_missing")
     outputs: list[dict[str, Any]] = []
     sessions: dict[str, list[str]] = {}
     calls: dict[str, Any] = {}
@@ -323,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
     prepare_args.add_argument("--git-sha", required=True)
     prepare_args.add_argument("--config", type=Path, required=True)
     prepare_args.add_argument("--output", type=Path, required=True)
+    prepare_args.add_argument("--benchmark", type=Path,
+                              help="Private source; copies user inputs only")
     collect_args = sub.add_parser("collect")
     collect_args.add_argument("--plan", type=Path, required=True)
     collect_args.add_argument("--captures", type=Path, required=True)
@@ -331,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "prepare":
             config, _ = read_json(args.config)
-            result = prepare(args.output, args.git_sha, config)
+            result = prepare(args.output, args.git_sha, config, benchmark=args.benchmark)
             print(f"Prepared {len(result['sessions'])} sessions; no external requests or approval.")
             return 0
         if args.output.exists():
