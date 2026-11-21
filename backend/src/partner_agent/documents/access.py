@@ -70,8 +70,9 @@ def document_access_allowed(
     group_allowed: bool = False,
 ) -> bool:
     allowed: set[str] = set()
-    if (get_settings().demo_public_knowledge and document.scope == "knowledge"
-            and document.active_version_id is not None and document.deleted_at is None):
+    if (action in ("answer", "original") and document.scope == "knowledge"
+            and document.active_version_id is not None and document.deleted_at is None
+            and get_settings().demo_public_knowledge):
         allowed.update(("knowledge.answer", "knowledge.excerpt", "original.download"))
     if document.owner_id == actor.id and actor.role in MANAGER_ROLES:
         allowed.update((
