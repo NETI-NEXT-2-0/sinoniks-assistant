@@ -547,4 +547,7 @@ async def answer_with_provider(
     return {**validated, "usage": usage, "answer_mode": mode,
             **({"design": conditions} if conditions is not None else {}),
             **({"vendor_wishes": decoded["vendor_wishes"]}
-               if "vendor_wishes" in decoded else {})}
+               if "vendor_wishes" in decoded else {}),
+            **({"developer_model_response": decoded}
+               if settings.developer_diagnostics_enabled and settings.environment != "production"
+               else {})}

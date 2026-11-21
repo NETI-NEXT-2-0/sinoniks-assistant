@@ -89,7 +89,10 @@ function DeveloperDiagnostics({ run, chatId, prompt }: { run: Run; chatId: strin
     run_status: run.status,
     runtime_profile: run.runtime_profile ?? null,
     error_code: outcome?.code ?? null,
-    error_summary: runFailure(run),
+    error_summary: run.status === 'failed' ? runFailure(run) : null,
+    project_saved: typeof outcome?.design_id === 'string',
+    project_id: outcome?.design_id ?? null,
+    project_revision: outcome?.design_revision ?? null,
     diagnostics: diagnostic,
     outcome,
   }, null, 2);
@@ -276,7 +279,8 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
     return <div className="run-detail" key={run.id}>
       <RunState run={run} />
       {!terminal(run.status) && <button className="run-stop" aria-label={`Остановить выполнение ${run.queue_seq}`} onClick={() => { void space.cancel(run.id); }}><Icon name="stop" />Стоп</button>}
-      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p><DeveloperDiagnostics run={run} chatId={value?.chat.id ?? null} prompt={value?.messages.find(message => message.id === run.input_message_id)} /></>}
+      {run.status === 'failed' && <p className="run-explanation">{runFailure(run)}</p>}
+      {terminal(run.status) && <DeveloperDiagnostics run={run} chatId={value?.chat.id ?? null} prompt={value?.messages.find(message => message.id === run.input_message_id)} />}
       {run.status === 'cancelled' && <p className="run-explanation">Выполнение остановлено. Полученный фрагмент сохранён.</p>}
       {run.status === 'waiting_input' && <div className="clarification">
         <p>{run.clarification_question ?? 'Уточните запрос, чтобы продолжить.'}</p>
