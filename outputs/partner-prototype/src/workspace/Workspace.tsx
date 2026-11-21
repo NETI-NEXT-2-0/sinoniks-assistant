@@ -62,6 +62,9 @@ function runFailure(run: Run): string {
   if (outcome?.code === 'rag_context_limit') return 'Сообщение вместе с условиями проекта слишком большое. Сократите сообщение или отправьте уточнения по частям. Сохранённый проект доступен для продолжения.';
   if (outcome?.code === 'provider_incomplete_response') return 'Сервис модели прервал ответ. Изменения проекта не сохранены. Попробуйте уточнить меньше условий за один запрос или дополните проект вручную.';
   if (typeof outcome?.code === 'string' && outcome.code.startsWith('provider_invalid_design')) return 'Не удалось проверить условия, предложенные моделью. Повторите запрос или дополните проект вручную.';
+  if (outcome?.code === 'provider_request_timeout') return 'Сервис модели не ответил вовремя. Проект не изменён. Повторите запрос — вводить все условия заново не нужно.';
+  if (outcome?.code === 'provider_unauthorized_citation' || outcome?.code === 'provider_invalid_citation_quote' || outcome?.code === 'provider_missing_grounded_citation') return 'Не удалось подтвердить ссылки в ответе модели. Этот ответ не применён к проекту. Повторите запрос или уточните условие; сохранённая версия доступна.';
+  if (outcome?.code === 'provider_invalid_rag_json') return 'Сервис модели вернул ответ в неподходящем формате. Проект сохранён без изменений. Повторите запрос.';
   if (outcome?.code === 'provider_request_failed') return 'Не удалось получить ответ от сервиса модели. Проверьте подключение к провайдеру и повторите запрос.';
   return 'Выполнение завершилось технической ошибкой. Ответ не подтверждён.';
 }

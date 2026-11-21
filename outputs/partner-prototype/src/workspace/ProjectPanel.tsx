@@ -111,7 +111,7 @@ export function ProjectPanel(props: Props) {
       </div>
     );
   const selected = loaded.selected;
-  if (fresh || (selected && isRequirements(selected)))
+  if (!selected || fresh || isRequirements(selected))
     return (
       <RequirementsPanel
         key={selected?.id ?? "new19"}

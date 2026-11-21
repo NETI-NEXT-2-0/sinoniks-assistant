@@ -233,6 +233,7 @@ async def test_polza_pins_declared_provider_without_fallback(route):
         body = json.loads(request.content)
         calls.append(body)
         assert body["model"] == "openai/gpt-6-luna"
+        assert body["response_format"] == {"type": "json_object"}
         assert body["provider"] == {"only": ["openai/flex"], "allow_fallbacks": False}
         assert "max_price" not in body["provider"]  # Polza pricing is in RUB.
         return httpx.Response(200, json={"choices": []})

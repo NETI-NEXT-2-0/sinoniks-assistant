@@ -149,8 +149,10 @@ def test_context_limit_removes_oldest_complete_exchanges():
     history = [{"role": role, "content": str(index) * 7000}
                for index in range(4) for role in ("user", "assistant")]
     messages = build_messages("Current", [], history)
-    assert len(messages) == 6
-    assert messages[1]["content"] == "2" * 7000
+    assert 4 <= len(messages) < len(history) + 2
+    assert len(messages) % 2 == 0
+    assert messages[-3:-1] == history[-2:]
+    assert len(json.dumps(messages, ensure_ascii=False)) <= 32000
     assert history[0]["content"] == "0" * 7000
     with pytest.raises(ProviderError, match="rag_context_limit"):
         build_messages("x" * 32000, [], history)

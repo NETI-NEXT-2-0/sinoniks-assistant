@@ -49,7 +49,7 @@ export function CalculatedProject({
     }
   }
   return (
-    <section className="design-result" aria-label="Расчёт Синоникса 1.9">
+    <section className="design-result calculated-project" aria-label="Расчёт Синоникса 1.9">
       <h3>
         {result.status === "completed"
           ? "Расчёт по заданным условиям"
@@ -133,8 +133,8 @@ export function CalculatedProject({
           </tbody>
         </table>
       </div>
-      <details>
-        <summary>Пояснение архитектуры и ограничений</summary>
+      <details open>
+        <summary>Почему система размещена так</summary>
         <p className="prose" style={{ whiteSpace: "pre-wrap" }}>
           {result.explanation}
         </p>
@@ -147,6 +147,7 @@ export function CalculatedProject({
         ].map((extension) => (
           <button
             type="button"
+            className={extension === 'drawio' ? 'project-download-primary' : undefined}
             key={extension}
             disabled={busy}
             onClick={() => {

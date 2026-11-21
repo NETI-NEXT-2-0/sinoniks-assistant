@@ -338,3 +338,27 @@ async def test_inherited_project_revalidates_derived_sources(corpus, monkeypatch
         assert outcome["code"] == "source_context_changed"
     else:
         assert await latest(client, chat, child["branch_id"])
+
+
+async def test_short_reply_keeps_previous_uncited_clarification(plane, monkeypatch):
+    client, headers, _ = await plane()
+    configure_execution(monkeypatch)
+    seen = []
+
+    async def clarify(settings, question, evidence, *, history=None, **kwargs):
+        seen.append(history)
+        if len(seen) == 1:
+            return {"answer": "В какую сеть добавить компьютер 3?", "citations": [],
+                    "usage": {}, "answer_mode": "insufficient"}
+        assert history[-2:] == [
+            {"role": "user", "content": "Добавь компьютер 3 в контур справа"},
+            {"role": "assistant", "content": "В какую сеть добавить компьютер 3?"},
+        ]
+        return {"answer": "Уточнение получено", "citations": [], "usage": {},
+                "answer_mode": "conversation"}
+
+    monkeypatch.setattr("partner_agent.runtime.runner.answer_with_provider", clarify)
+    chat = await new_chat(client, headers)
+    await execute(client, headers, chat, "Добавь компьютер 3 в контур справа")
+    await execute(client, headers, chat, "Сеть цеха")
+    assert len(seen) == 2

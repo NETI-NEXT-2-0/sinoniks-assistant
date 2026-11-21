@@ -68,3 +68,35 @@
  .design-content fieldset { padding: 16px; }
  .design-fields :is(input,select) { font-size: 16px; }
 }
+
+/* Project workbench: one saved result and a separate, persistent editor. */
+.project-workbench { max-width: 1224px; width: 100%; margin-inline: auto; }
+.project-workbench>p { font-size: 14px; line-height: 1.65; color: var(--secondary); }
+.project-header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.design-panel .project-save, .design-panel .project-download-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.design-panel .project-save:hover, .design-panel .project-download-primary:hover { background: var(--hover); }
+.project-version-status { padding: 12px 0; }
+.project-version-status.has-changes { color: var(--accent-text); }
+.project-sections { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 16px; border-bottom: 1px solid var(--stroke); }
+.project-sections button[aria-pressed=true] { background: var(--raised); border-color: var(--accent-text); }
+.project-workbench [hidden] { display: none; }
+.project-workbench .design-result { border-top: 0; padding-top: 0; }
+.project-workbench .design-actions { margin-block: 16px; }
+.project-editor-intro { margin-bottom: 24px; max-width: 72ch; }
+.project-editor-intro h3, .project-empty-result h3 { font-size: 24px; margin: 0 0 12px; }
+.project-editor-intro p, .project-empty-result p { color: var(--secondary); font-size: 14px; line-height: 1.7; }
+.project-empty-result { padding: 24px 0; max-width: 68ch; }
+.project-empty-result button { margin-top: 16px; }
+.project-unsaved-note { padding: 16px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; font-size: 14px; line-height: 1.65; }
+.calculated-project .diagram-viewer .diagram-rule-table { display: none; }
+.project-workbench .design-fields:has(> label:nth-child(3)) { row-gap: 20px; }
+.project-workbench fieldset { background: var(--panel); }
+.project-workbench fieldset fieldset { background: transparent; }
+.project-workbench .design-fields input, .project-workbench .design-fields select { background: var(--page); }
+@media (max-width:760px) {
+ .project-header-actions { width: 100%; }
+ .project-header-actions button { flex: 1; }
+ .project-sections { gap: 8px; }
+ .project-sections button { flex: 1; }
+ .project-workbench .design-fields { row-gap: 20px; }
+}

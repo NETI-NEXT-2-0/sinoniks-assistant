@@ -114,7 +114,7 @@ async def answer_history(
         evidence_ids = previous_context.evidence_ids if previous_context else []
         if ((previous.outcome or {}).get("profile") != "offline_fixture" and not evidence_ids
                 and (previous.outcome or {}).get("answer_mode") not in (
-                    "conversation", "design", "project_explanation",
+                    "conversation", "design", "project_explanation", "insufficient",
                 )):
             continue
         if len(set(sources) | set(evidence_ids)) > 80:

@@ -131,3 +131,17 @@
 
 .chat-layout .empty h1 { color: var(--ink); }
 .chat-layout .profile-name>span { color: var(--secondary); }
+
+/* A one-line message stays compact; multiline input remains resizable by content. */
+.chat-layout .composer { padding: 8px 12px; }
+.chat-layout .chat-input-row { align-items: center; gap: 8px; }
+.chat-layout .composer textarea { min-height: 24px; line-height: 24px; padding: 0; margin: 0; }
+.chat-layout .chat-attach-button { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
+.chat-layout .send { width: 36px; height: 36px; }
+.run-developer-diagnostics { margin-top: 12px; font-size: 13px; }
+.run-developer-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--panel); border-radius: 8px; }
+@media (pointer:coarse) { .chat-layout .chat-attach-button, .chat-layout .send { min-width: 44px; min-height: 44px; } }
+
+.chat-layout .chat-input-row { padding: 0; }
+.chat-layout .chat-input-row textarea { min-height: 24px; line-height: 24px; padding: 0 4px; }
+.chat-layout .chat-input-row .send { margin: 0; width: 36px; height: 36px; }

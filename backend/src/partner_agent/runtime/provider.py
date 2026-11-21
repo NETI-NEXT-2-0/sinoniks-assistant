@@ -307,6 +307,7 @@ async def chat_completion(
     if settings.model_endpoint.rstrip("/") == "https://polza.ai/api/v1":
         if not settings.model_provider_variant or settings.model_wire_api != "chat_completions":
             raise ProviderError("provider_route_required")
+        payload["response_format"] = {"type": "json_object"}
         payload["provider"] = {
             "only": [settings.model_provider_variant],
             "allow_fallbacks": False,

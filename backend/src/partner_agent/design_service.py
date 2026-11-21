@@ -38,7 +38,16 @@ async def validate_project_sources(
 def project_readout(project: DesignRevision) -> dict[str, Any]:
     if project.input.get("schema_version") == 3:
         result = project.result
+        displayed = None
+        placement = result.get("synonyx") if result else None
+        if isinstance(placement, dict):
+            networks = {item["id"]: {"id": item["id"], "name": item.get("name")}
+                        for item in project.input.get("networks", [])}
+            left, right = placement.get("node_a_network_id"), placement.get("node_b_network_id")
+            if left in networks and right in networks and left != right:
+                displayed = {"left": networks[left], "right": networks[right]}
         return {"revision": project.revision,
+                "displayed_networks": displayed,
                 "requirements_status": revision_status(project),
                 "has_architecture": bool(result and result.get("synonyx")),
                 "counts": ({"rules_count": result.get("confirmed_rules_count"),

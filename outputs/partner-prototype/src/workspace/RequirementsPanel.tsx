@@ -80,6 +80,7 @@ export function RequirementsPanel({
   onExpired,
 }: Props) {
   const [saved, setSaved] = useState(initial);
+  const [section, setSection] = useState<'overview' | 'requirements'>(initial?.result ? 'overview' : 'requirements');
   const [input, setInput] = useState(initial?.input ?? empty);
   const [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(false),
@@ -273,7 +274,7 @@ export function RequirementsPanel({
             ...event.currentTarget.querySelectorAll<HTMLElement>(
               "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)",
             ),
-          ];
+          ].filter(control => !control.closest('[hidden]') && control.getClientRects().length > 0);
           const first = controls[0],
             last = controls.at(-1);
           if (
@@ -290,28 +291,29 @@ export function RequirementsPanel({
       >
         <header className="design-header">
           <div>
-            <h2 id="requirements-title">Требования к Синониксу 1.9</h2>
+            <h2 id="requirements-title">Проект Синоникса</h2>
             <p>
-              Уточните сети и обмен. Сохранённые версии доступны в этой ветке
-              чата.
+              {saved ? `Версия ${saved.revision} · ` : 'Новый проект · '}
+              {historical ? 'Архив только для чтения' : 'Схема, правила обмена и исходные условия'}
             </p>
           </div>
-          <button disabled={busy} onClick={() => leave(close)}>
-            К чату
-          </button>
+          <div className="project-header-actions">
+            {section === 'requirements' && !historical && <button type="submit" form="project-requirements-form" className="project-save" disabled={busy}>{busy ? 'Сохраняем…' : uncertain ? 'Повторить сохранение' : 'Сохранить и рассчитать'}</button>}
+            <button disabled={busy} onClick={() => leave(close)}>К чату</button>
+          </div>
         </header>
-        <div className="design-content">
+        <div className="design-content project-workbench">
           {error && (
             <p role="alert" className="design-error">
               {error}
             </p>
           )}
-          <p role="status">
+          <p role="status" className={`project-version-status ${dirty ? 'has-changes' : ''}`}>
             {dirty
               ? "Есть несохранённые изменения."
               : saved
-                ? `Сохранена версия ${saved.revision}.`
-                : "Новый проект ещё не сохранён."}{" "}
+                ? `Показана сохранённая версия ${saved.revision}.`
+                : "Опишите сети и обмены — после сохранения появится расчёт."}{" "}
             {historical && "Архивная версия доступна только для чтения."}
           </p>
           <p>
@@ -340,8 +342,17 @@ export function RequirementsPanel({
               </button>
             )}
           </div>
-          {saved?.result && <CalculatedProject auth={auth} chatId={chatId} revision={saved} onExpired={onExpired} />}
-      <form
+          <nav className="project-sections" aria-label="Раздел проекта">
+            <button type="button" aria-pressed={section === 'overview'} aria-controls="project-overview" onClick={() => setSection('overview')}>Схема и правила</button>
+            <button type="button" aria-pressed={section === 'requirements'} aria-controls="project-requirements" onClick={() => setSection('requirements')}>Редактировать условия</button>
+          </nav>
+          <section id="project-overview" hidden={section !== 'overview'}>
+            {dirty && <p className="project-unsaved-note">Схема ниже относится к сохранённой версии. Сохраните изменённые условия, чтобы обновить расчёт.</p>}
+            {saved?.result ? <CalculatedProject auth={auth} chatId={chatId} revision={saved} onExpired={onExpired} /> : <div className="project-empty-result"><h3>Расчёта пока нет</h3><p>Укажите сети, системы и направления обмена. Неизвестные параметры можно оставить для уточнения в чате.</p><button type="button" onClick={() => setSection('requirements')}>Перейти к условиям</button></div>}
+          </section>
+          <section id="project-requirements" hidden={section !== 'requirements'}>
+            <div className="project-editor-intro"><h3>Условия проекта</h3><p>Сначала проверьте сети, затем системы и обмены. «Уточнить» означает, что параметр пока неизвестен. Сохранение создаёт новую версию и пересчитывает правила.</p></div>
+      <form id="project-requirements-form"
             onSubmit={(event) => {
               event.preventDefault();
               void submit();
@@ -1185,7 +1196,7 @@ export function RequirementsPanel({
                   ? "Сохраняем…"
                   : uncertain
                     ? "Повторить сохранение"
-                    : "Сохранить требования"}
+                    : "Сохранить и рассчитать"}
               </button>
             </div>
           </form>
@@ -1231,6 +1242,7 @@ export function RequirementsPanel({
               ))}
             </section>
           )}
+          </section>
         </div>
       </section>
     </div>
