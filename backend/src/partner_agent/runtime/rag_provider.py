@@ -156,7 +156,10 @@ def prepare_request(
             label += f" (page snapshot captured {item['web_source']['captured_on']})"
         title = item.get("title")
         source_title = f" Source title: {title[:200]}." if isinstance(title, str) else ""
-        blocks.append(f"[source_{index}]{label}{source_title} {excerpt}")
+        locator = item.get("locator")
+        location = citation_location(locator) if isinstance(locator, dict) else None
+        source_location = f" Source locator: {location}." if location else ""
+        blocks.append(f"[source_{index}]{label}{source_title}{source_location} {excerpt}")
     instruction = (
         "Reply in the user's language. For small talk, brainstorming and general knowledge, "
         "converse without requiring evidence or claiming human experiences. "
@@ -182,6 +185,10 @@ def prepare_request(
         "A short user reply can answer your previous clarification: combine the current "
         "reply with the latest pending request in dialogue before choosing the response mode. "
         "Omitted excerpts are not proof of absence. "
+        "Use Source title and Source locator to identify the actual file and verified "
+        "page range when asked; copy the filename exactly instead of guessing or denying "
+        "metadata that is present. A PDF page range does not establish a separately printed "
+        "slide number; report the verified range and distinguish any unverified numbering. "
         "Evidence titles identify source versions: for case constraints prefer supplied "
         "Sinoniks 1.9 scope and methodology over older manuals or marketing. General "
         "protocol documentation never proves that a feature is supported by Sinoniks."
