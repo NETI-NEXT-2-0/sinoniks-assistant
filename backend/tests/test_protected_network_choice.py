@@ -66,7 +66,10 @@ def test_choice_unknown_and_server_assigned_network_ids_survive_round_trip():
     assigned = bind_requirements(chosen, None, message_id=message_id, command_id=uuid4())
     protected = next(network for network in assigned.networks if network.name == "Закрытая станция")
     assert assigned.protected_network_id == protected.id and protected.id != "inner"
-    unknown = apply_answer(assigned, ProjectAnswer19(
+    unassigned = bind_requirements(
+        Requirements19.model_validate(open_pair()), None, message_id=message_id, command_id=uuid4(),
+    )
+    unknown = apply_answer(unassigned, ProjectAnswer19(
         base_revision_id=uuid4(), path="/protected_network_id", unknown=True,
     ))
     assert unknown.protected_network_id is None

@@ -201,6 +201,7 @@ class Requirements19(StrictModel):
     requests_for_vendor: list[VendorRequest19] = Field(default_factory=list, max_length=256)
     legacy: LegacyContext19 | None = None
     protected_network_id: Identifier | None = None
+    existing_firewall_name: Name19 | None = None
 
     @model_serializer(mode="wrap")
     def compatible_dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -211,6 +212,8 @@ class Requirements19(StrictModel):
             note.path == "/protected_network_id" for note in notes
         ):
             document.pop("protected_network_id", None)
+        if self.existing_firewall_name is None:
+            document.pop("existing_firewall_name", None)
         return document
 
     @field_validator("schema_version", mode="before")

@@ -7,6 +7,13 @@ from partner_agent.sinoniks_contract import INDUSTRIAL_PROTOCOLS, Protocol, Sour
 from partner_agent.sinoniks_contract19 import DataFlow19, Requirements19
 
 RULE_LIMIT = 256
+FIREWALL_ID = "firewall"
+
+
+def existing_firewall_details(request: Requirements19) -> dict[str, str | bool]:
+    if request.existing_firewall_name is None:
+        return {}
+    return {"id": FIREWALL_ID, "name": request.existing_firewall_name, "existing": True}
 Mode = Literal["one-way", "two-way"]
 
 

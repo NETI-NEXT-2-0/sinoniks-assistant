@@ -129,6 +129,7 @@ export function DesignResultCard({
       </div>
       {hasQuestions && branchId && onAnswer && (
         <ProjectClarifications
+          key={JSON.stringify([chatId, branchId, id])}
           auth={auth}
           chatId={chatId}
           branchId={branchId}

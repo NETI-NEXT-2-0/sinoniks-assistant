@@ -73,6 +73,55 @@ async def test_direct_answer_is_idempotent_auditable_and_zero_provider_calls(pla
     assert (await send_answer(client, headers, chat, first, key=key)).json() == admitted.json()
 
 
+async def test_batch_applies_known_and_unknown_answers_in_one_revision(plane, monkeypatch):
+    client, headers, _ = await plane()
+    configure_execution(monkeypatch)
+    no_model(monkeypatch)
+    chat = await new_chat(client, headers)
+    chat_url = f"/api/v1/chats/{chat['id']}"
+    branch = chat["default_branch_id"]
+    design_url = chat_url + "/designs"
+    document = data_project()
+    document["flows"][0].update(protocol=None, destination_port=None)
+    first = (await save(client, headers, design_url, branch, document)).json()
+    target = first["input"]["flows"][0]["id"]
+    fields = [
+        {"path": "/flows/0/protocol", "target_id": target, "value": "UDP"},
+        {"path": "/flows/0/destination_port", "target_id": target, "unknown": True},
+    ]
+    command_headers = {**headers, "Idempotency-Key": str(uuid4())}
+    payload = {
+        "branch_id": branch,
+        "message": "Применить уточнения проекта",
+        "request_mode": "design",
+        "project_answer": {"base_revision_id": first["id"], "answers": fields},
+    }
+    fields[1]["value"] = 70000
+    fields[1]["unknown"] = False
+    invalid = await client.post(chat_url + "/runs", headers=command_headers, json=payload)
+    assert invalid.status_code == 422 and invalid.json()["code"] == "invalid_project_answer"
+    latest = await client.get(design_url + "/latest", params={"branch_id": branch})
+    assert latest.json()["design"]["id"] == first["id"]
+
+    del fields[1]["value"]
+    fields[1]["unknown"] = True
+    admitted = await client.post(chat_url + "/runs", headers=command_headers, json=payload)
+    assert admitted.status_code == 202, admitted.text
+    run_id = admitted.json()["run_id"]
+    assert (await execute_run(UUID(run_id), dispatch_generation=0))["status"] == "succeeded"
+    replay = await client.post(chat_url + "/runs", headers=command_headers, json=payload)
+    assert replay.json() == admitted.json()
+    latest = await client.get(design_url + "/latest", params={"branch_id": branch})
+    current = latest.json()["design"]
+    assert current["revision"] == 2 and current["parent_id"] == first["id"]
+    assert current["input"]["flows"][0]["protocol"] == "UDP"
+    assert current["input"]["flows"][0]["destination_port"] is None
+    assert current["input"]["unknowns"][0]["path"] == "/flows/0/destination_port"
+    run = (await client.get(f"/api/v1/runs/{run_id}")).json()
+    assert run["outcome"]["provider_calls"] == 0
+    assert len(run["outcome"]["project_answer"]["answers"]) == 2
+
+
 async def test_questions_are_exact_owner_branch_scoped_and_stale_selection_rejected(plane):
     client, headers, _ = await plane()
     admin, _, _ = await plane("admin")
@@ -135,7 +184,9 @@ async def test_regenerate_reapplies_original_structured_command_without_a_provid
     no_model(monkeypatch)
     chat = await new_chat(client, headers)
     branch, base = chat["default_branch_id"], f"/api/v1/chats/{chat['id']}/designs"
-    first = (await save(client, headers, base, branch, data_project())).json()
+    document = data_project()
+    document["flows"][0]["protocol"] = None
+    first = (await save(client, headers, base, branch, document)).json()
     run = (await send_answer(client, headers, chat, first, value=None, unknown=True)).json()
     assert (await execute_run(UUID(run["run_id"]), dispatch_generation=0))["status"] == "succeeded"
     snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()

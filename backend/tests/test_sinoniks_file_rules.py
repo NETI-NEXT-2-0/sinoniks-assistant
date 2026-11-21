@@ -1,5 +1,9 @@
+import json
 from xml.etree import ElementTree
 
+import pytest
+
+from partner_agent.requirements_result import result_artifacts19
 from partner_agent.sinoniks_calculation import calculate_rules, solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_contract19_io import assess
@@ -51,6 +55,12 @@ def test_two_pulls_and_pushes_on_both_nodes_become_two_rules_and_two_users():
     assert [rule.direction for rule in result.rules] == ["forward", "forward"]
     expert = export_result(request, session_id="test-u01")
     assert expert["file_users_count"] == 2 and expert["file_users_range"] is None
+    details = expert["file_users_breakdown"]
+    assert details["manual"] == {"min": 0, "max": 0, "actors": []}
+    assert details["technical_pull_count"] == 2
+    assert {operation["storage_id"] for operation in details["technical_pulls"]} == {
+        "office-store", "plant-store",
+    }
     assert [(rule["from"], rule["to"], rule["protocol"]) for rule in expert["rules"]] == [
         ("office", "plant", {"office": "SFTP, PULL", "plant": "SFTP, PUSH"}),
         ("plant", "office", {"office": "SFTP, PUSH", "plant": "SFTP, PULL"}),
@@ -84,7 +94,7 @@ def test_f04_manual_sftp_and_smb_push_need_one_known_user():
 def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     request = plan([
         files(
-            "updates", side("office", usb=True, actor_ids=["operator"],
+            "updates", side("office", manual=True, usb=True, actor_ids=["operator"],
                             checks=[{"kind": "icap", "icap_service": "antivirus"}]),
             side("plant", automations=[automation("PUSH", "plant", "SMB")]),
             sender_ids=["media"], receiver_ids=["plant-store"],
@@ -108,6 +118,12 @@ def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     assert expert["schema_version"] == "1.1" and expert["session_id"] == "test-f07"
     assert expert["status"] == "completed" and expert["rules_count"] == 3
     assert expert["file_users_count"] == 1
+    assert expert["file_users_breakdown"] == {
+        "manual": {"min": 1, "max": 1, "actors": [{"id": "operator", "name": None}]},
+        "technical_pull_count": 0,
+        "technical_pulls": [],
+        "upper_unknown_reasons": [],
+    }
     mqtt = next(rule for rule in expert["rules"] if rule["protocol"] == "MQTT")
     assert mqtt["port"] is None and mqtt["mode"] == "two-way"
     file = next(rule for rule in expert["rules"] if rule["type"] == "file")
@@ -130,6 +146,26 @@ def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     assert any(cell.get("source") == "usb-1" and cell.get("target") == "node-A"
                for cell in xml.findall(".//mxCell"))
     assert xml.find(".//mxCell[@id='node-A'][@vertex='1']") is not None
+
+
+@pytest.mark.parametrize("manual_protocol", [None, "SFTP"])
+def test_usb_only_shows_sftp_when_it_is_explicitly_specified(manual_protocol):
+    request = plan([files(
+        "updates",
+        side("office", manual=True, usb=True, manual_protocol=manual_protocol,
+             actor_ids=["operator"]),
+        side("plant", automations=[automation("PUSH", "plant", "SMB")]),
+        receiver_ids=["plant-store"],
+    )])
+    result, artifacts = result_artifacts19(request, session_id="usb-export")
+    rule, = result["rules"]
+    diagram = ElementTree.fromstring(artifacts["drawio"])
+    row, = json.loads(diagram.attrib["data-rule-rows"])
+    assert row["id"] == rule["rule_id"] and row["number"] == rule["id"]
+    assert (row["sender_side"], row["two_way"]) == ("A", False)
+    for medium in (artifacts["txt"], rule["protocol"]["office"], row["protocol"]):
+        assert "USB" in medium and ("SFTP" in medium) == (manual_protocol is not None)
+    assert "SMB PUSH" in row["protocol"]
 
 
 def test_same_profile_merges_both_directions_and_deduplicates_person():
@@ -200,6 +236,13 @@ def test_unknown_methods_and_checks_never_become_a_certified_rule_count():
     assert expert["rules_count"] == len(expert["rules"])
     assert expert["confirmed_rules_count"] is None and expert["rules_lower_bound"] == 1
     assert expert["rules"][0]["protocol"] == {"office": None, "plant": None}
+    assert expert["rules_lower_bound_breakdown"] == {"data": 0, "file": 1}
+    assert {issue["reason"] for issue in expert["rules"][0]["provisional_reasons"]} == {
+        "file_checks_unknown", "file_visibility_unknown", "file_method_unknown_or_unavailable",
+    }
+    assert expert["file_users_breakdown"]["upper_unknown_reasons"] == [
+        "manual_upper_unknown", "file_rules_incomplete",
+    ]
 
 
 def test_expert_export_preserves_declared_initiator_and_known_user_range():

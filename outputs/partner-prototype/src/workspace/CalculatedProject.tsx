@@ -4,6 +4,11 @@ import { ApiError, type AuthClient } from "../api/client";
 import type { RequirementsRevision } from "../api/requirements";
 import { DiagramViewer } from "./DiagramViewer";
 
+function countRange({ min, max }: { min: number; max: number | null }): string {
+  if (max === min) return String(min);
+  return max === null ? `не менее ${min}` : `${min}–${max}`;
+}
+
 export function CalculatedProject({
   auth,
   chatId,
@@ -23,10 +28,8 @@ export function CalculatedProject({
     result.networks.find((item) => item.id === id)?.name ?? "Сеть без названия";
   const users = result.file_users_count;
   const userRange = result.file_users_range;
-  const userCount = users !== null ? String(users)
-    : userRange === null ? "неизвестно"
-    : userRange.max === null ? `не менее ${userRange.min}`
-    : `${userRange.min}–${userRange.max}`;
+  const userCount = users !== null ? String(users) : userRange ? countRange(userRange) : "неизвестно";
+  const userDetails = result.file_users_breakdown;
   async function download(extension: string): Promise<void> {
     setBusy(true);
     setError("");
@@ -86,7 +89,21 @@ export function CalculatedProject({
           ? `Полный минимум не подтверждён. Нижняя оценка: ${result.rules_lower_bound}; в предварительном наборе: ${result.rules_count}.`
           : `Минимальное число правил Синоникса: ${result.confirmed_rules_count}.`}
       </p>
+      {result.confirmed_rules_count === null && result.rules_lower_bound_breakdown && (
+        <p>
+          В нижней оценке {result.rules_lower_bound_breakdown.data} правил данных
+          и {result.rules_lower_bound_breakdown.file} файловых.
+        </p>
+      )}
       <p>Пользователей передачи файлов: {userCount}.</p>
+      {userDetails && revision.input.flows.some((flow) => flow.kind === "file") && (
+        <p>
+          Ручных пользователей — {countRange(userDetails.manual)}
+          {userDetails.manual.actors.length > 0 &&
+            ` (${userDetails.manual.actors.map((actor) => actor.name || actor.id).join(", ")})`}.
+          Технических пользователей по операциям PULL — {userDetails.technical_pull_count}.
+        </p>
+      )}
       {revision.artifact_sha256?.diagram ? (
         <DiagramViewer
           auth={auth}
@@ -151,6 +168,11 @@ export function CalculatedProject({
                       {rule.checks.join(", ")}
                     </>
                   ) : null}
+                  {rule.provisional_reasons?.map((issue) => (
+                    <div key={JSON.stringify([issue.flow_id, issue.network_id, issue.reason])}>
+                      {issue.label}{issue.network_id && ` (${network(issue.network_id)})`}
+                    </div>
+                  ))}
                 </td>
               </tr>
             ))}

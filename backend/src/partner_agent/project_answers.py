@@ -22,9 +22,7 @@ PATH = re.compile(
 )
 
 
-class ProjectAnswer19(StrictModel):
-    schema_version: Literal[1] = 1
-    base_revision_id: UUID
+class ProjectFieldAnswer19(StrictModel):
     path: str = Field(min_length=1, max_length=180)
     target_id: Identifier | None = None
     side_network_id: Identifier | None = None
@@ -32,7 +30,7 @@ class ProjectAnswer19(StrictModel):
     unknown: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
-    def allowed_field(self) -> "ProjectAnswer19":
+    def allowed_field(self) -> "ProjectFieldAnswer19":
         if PATH.fullmatch(self.path) is None:
             raise ValueError("This field cannot be answered with a structured command")
         if len(json.dumps(self.value, ensure_ascii=False)) > 8000:
@@ -47,8 +45,46 @@ class ProjectAnswer19(StrictModel):
         return self
 
 
-def apply_answer(request: Requirements19, answer: ProjectAnswer19) -> Requirements19:
+class ProjectAnswer19(ProjectFieldAnswer19):
+    schema_version: Literal[1] = 1
+    base_revision_id: UUID
+
+
+class ProjectAnswerBatch19(StrictModel):
+    schema_version: Literal[1] = 1
+    base_revision_id: UUID
+    answers: list[ProjectFieldAnswer19] = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def unique_fields(self) -> "ProjectAnswerBatch19":
+        if len({answer.path for answer in self.answers}) != len(self.answers):
+            raise ValueError("Each field must appear once in the batch")
+        return self
+
+
+ProjectAnswerCommand19 = ProjectAnswer19 | ProjectAnswerBatch19
+
+
+def parse_project_answer(value: dict[str, Any] | None) -> ProjectAnswerCommand19:
+    if value is not None and "answers" in value:
+        return ProjectAnswerBatch19.model_validate(value)
+    return ProjectAnswer19.model_validate(value)
+
+
+def apply_answer(request: Requirements19, command: ProjectAnswerCommand19) -> Requirements19:
     document = request.model_dump(mode="json")
+    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    for answer in answers:
+        _apply_field_answer(document, answer)
+    try:
+        return Requirements19.model_validate(document)
+    except ValidationError:
+        raise APIError(
+            422, "invalid_project_answer", "The answer conflicts with project fields"
+        ) from None
+
+
+def _apply_field_answer(document: dict[str, Any], answer: ProjectFieldAnswer19) -> None:
     if answer.path == "/protected_network_id":
         document.setdefault("protected_network_id", None)
     segments = answer.path.split("/")
@@ -67,11 +103,11 @@ def apply_answer(request: Requirements19, answer: ProjectAnswer19) -> Requiremen
     except ValueError:
         raise APIError(409, "question_context_changed", "Reload the project question") from None
     field = segments[-1]
-    parent[field] = (
-        ([] if field in ("sender_ids", "receiver_ids") else None)
-        if answer.unknown
-        else answer.value
-    )
+    empty_value: JsonValue = [] if field in ("sender_ids", "receiver_ids") else None
+    if answer.unknown and parent[field] != empty_value:
+        raise APIError(409, "question_context_changed", "The project field already has a value")
+    if not answer.unknown:
+        parent[field] = answer.value
     for collection in ("unknowns", "assumptions"):
         document[collection] = [
             note
@@ -82,12 +118,6 @@ def apply_answer(request: Requirements19, answer: ProjectAnswer19) -> Requiremen
         document["unknowns"].append(
             {"path": answer.path, "target_id": answer.target_id, "reason": "user_unknown"}
         )
-    try:
-        return Requirements19.model_validate(document)
-    except ValidationError:
-        raise APIError(
-            422, "invalid_project_answer", "The answer conflicts with project fields"
-        ) from None
 
 
 def question_choices(request: Requirements19) -> list[dict[str, Any]]:

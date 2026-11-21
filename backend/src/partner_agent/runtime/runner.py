@@ -156,6 +156,12 @@ async def execute_run(
                 answer = result["answer"]
                 if answer_mode == "project_explanation" and project is not None:
                     answer = f"По сохранённой ревизии №{project.revision}.\n\n{answer}"
+                elif (current_run.request_mode == "design" and answer_mode == "insufficient"
+                      and project is not None):
+                    answer = (
+                        "Изменения по этому запросу не сохранены. "
+                        f"Запрос выполнен для версии №{project.revision}.\n\n{answer}"
+                    )
                 success_outcome: dict[str, Any] = {
                     "profile": settings.runtime_profile, "citations": result["citations"],
                     "usage": result["usage"], "estimated_cost_usd": actual_cost,
@@ -179,7 +185,9 @@ async def execute_run(
                         ),
                         "design_context_counts": project_counts,
                         "design_context_chars": (
-                            len(json.dumps(project_context, ensure_ascii=False))
+                            len(json.dumps(
+                                project_context, ensure_ascii=False, separators=(",", ":"),
+                            ))
                             if project_context is not None else 0
                         ),
                         "prepared_message_chars": len(json.dumps(

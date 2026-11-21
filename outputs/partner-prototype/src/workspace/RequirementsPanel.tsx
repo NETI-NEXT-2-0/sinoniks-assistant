@@ -430,6 +430,17 @@ export function RequirementsPanel({
               </fieldset>
             )}
             <fieldset disabled={disabled}>
+              <legend>Межсетевой экран на границе</legend>
+              <label>
+                Название установленного экрана
+                <input maxLength={120} value={input.existing_firewall_name ?? ""}
+                  onChange={(event) => change({
+                    ...input, existing_firewall_name: event.target.value || null,
+                  })}
+                />
+              </label>
+            </fieldset>
+            <fieldset disabled={disabled}>
               <legend>Системы и хранилища</legend>
               {input.systems.map((system, index) => (
                 <div className="design-fields" key={system.id}>

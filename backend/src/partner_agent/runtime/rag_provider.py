@@ -244,6 +244,8 @@ def prepare_request(
             "side when both networks are open. Never relabel an open network as closed. "
             "Never invent this choice: leave it absent/null until the user chooses; it is a "
             "project assumption, not a change of trust. A root unknown uses target_id=null. "
+            "Optional existing_firewall_name preserves the stated name of the installed "
+            "boundary firewall to reuse. Include it only when the user identifies that firewall. "
             "For mixed supported/unsupported requests, preserve supported flows in the design "
             "and record the unsupported request in requests_for_vendor; do not discard valid work. "
             "Saving a project, calculating rules, drawing its diagram and exporting draw.io or "
@@ -340,7 +342,9 @@ def prepare_request(
     if design_context is not None and request_mode != "reference":
         label = ("New draft requirements (not yet saved)" if new_project
                  else "Saved project conditions")
-        project = "\n" + label + ":\n" + json.dumps(design_context, ensure_ascii=False)
+        project = "\n" + label + ":\n" + json.dumps(
+            design_context, ensure_ascii=False, separators=(",", ":"),
+        )
     calculation = ""
 
     def messages_for(

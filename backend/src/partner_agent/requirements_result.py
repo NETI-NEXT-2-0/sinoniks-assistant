@@ -7,7 +7,7 @@ from partner_agent.sinoniks_calculation import solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_export import diagram_artifacts
 from partner_agent.sinoniks_layout19 import diagram_unavailability19, layout19
-from partner_agent.sinoniks_result_export import result_document
+from partner_agent.sinoniks_result_export import FILE_ISSUE_LABELS, result_document
 
 ISSUE_LABELS = {
     "protected_side_unresolved": "Не определена защищаемая сторона",
@@ -24,13 +24,7 @@ ISSUE_LABELS = {
     "ntp_requires_protected_destination": "Время должно передаваться в защищаемую сеть",
     "ntp_requires_one_time_source": "Нужен один источник времени",
     "ntp_requires_one_way_udp": "Для NTP в кейсе нужен однонаправленный UDP",
-    "file_checks_unknown": "Не уточнены файловые проверки",
-    "file_visibility_unknown": "Не уточнена видимость принятых файлов",
-    "file_method_unknown_or_unavailable": "Не уточнён или недоступен способ передачи файлов",
-    "file_automation_details_unknown": "Не уточнены протокол или хранилище файлов",
-    "file_automation_pairing_unknown": "Не определено соответствие автоматических операций",
-    "usb_requires_node_a": "USB должен подключаться на стороне Узла А",
-    "unsupported_file_check": "Запрошенная проверка не поддерживается продуктом",
+    **FILE_ISSUE_LABELS,
 }
 
 
@@ -51,6 +45,11 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
                 "Сети не соединяются напрямую, перенос проходит через изолированное Ядро.",
             ]
         )
+        if request.existing_firewall_name is not None:
+            lines.append(
+                "На этой границе используется установленный экран "
+                f"«{request.existing_firewall_name}»."
+            )
     else:
         lines.append("Размещение пока не определено: уточните две сети и защищаемую сторону.")
     if result.get("capacity_exceeded"):
@@ -59,9 +58,14 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
     if confirmed is not None:
         lines.append(f"Минимальное число правил Синоникса по заданным условиям: {confirmed}.")
     else:
+        lower_bound = result.get("rules_lower_bound_breakdown")
+        breakdown = (
+            f" ({lower_bound['data']} для данных и {lower_bound['file']} для файлов)"
+            if lower_bound else ""
+        )
         lines.append(
             f"Предварительный набор: {result['rules_count']} правил. "
-            f"Подтверждённая нижняя оценка: {result['rules_lower_bound']}. "
+            f"Подтверждённая нижняя оценка: {result['rules_lower_bound']}{breakdown}. "
             "Полный минимум пока не подтверждён."
         )
     for rule in result["rules"]:
@@ -89,6 +93,10 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
         lines.append(
             f"{rule['id']}. {rule['description']}: {source} {direction} {target}. {detail}."
         )
+        for issue in rule.get("provisional_reasons", []):
+            network = networks.get(issue["network_id"])
+            scope = f" ({network})" if network else ""
+            lines.append(f"   Требует уточнения: {issue['label']}{scope}.")
     if any(system.kind == "usb" for system in request.systems) or any(
         flow.kind == "file" and any(side.usb is True for side in flow.sides)
         for flow in request.flows
@@ -99,16 +107,38 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
         )
     users = result.get("file_users_count")
     user_range = result.get("file_users_range")
-    upper = user_range["max"] if user_range and user_range["max"] is not None else "неизвестно"
-    lines.append(
-        f"Пользователей передачи файлов: {users}."
-        if users is not None
-        else (
-            f"Пользователей передачи файлов: от {user_range['min']} до {upper} (верхняя граница)."
-            if user_range
-            else "Число пользователей передачи файлов не определено."
+    if users is not None:
+        lines.append(f"Пользователей передачи файлов: {users}.")
+    elif user_range and user_range["max"] is not None:
+        lines.append(
+            f"Пользователей передачи файлов: от {user_range['min']} до {user_range['max']}."
         )
-    )
+    elif user_range:
+        lines.append(f"Пользователей передачи файлов: не менее {user_range['min']}.")
+    else:
+        lines.append("Число пользователей передачи файлов не определено.")
+    user_details = result.get("file_users_breakdown")
+    if user_details and any(flow.kind == "file" for flow in request.flows):
+        manual = user_details["manual"]
+        names = ", ".join(item["name"] or item["id"] for item in manual["actors"])
+        people = f" ({names})" if names else ""
+        manual_count = (
+            str(manual["min"]) if manual["min"] == manual["max"] else
+            f"{manual['min']}–{manual['max']}" if manual["max"] is not None else
+            f"не менее {manual['min']}"
+        )
+        lines.append(f"Ручные пользователи: {manual_count}{people}.")
+        lines.append(
+            f"Технические пользователи: {user_details['technical_pull_count']} "
+            "по одному на каждую учтённую направленную операцию PULL. "
+            "Ручные пользователи считаются по уникальным участникам и заявленному диапазону."
+        )
+        if "manual_upper_unknown" in user_details["upper_unknown_reasons"]:
+            lines.append("Верхняя граница числа ручных пользователей неизвестна.")
+        if "file_rules_incomplete" in user_details["upper_unknown_reasons"]:
+            lines.append(
+                "Верхняя граница общего числа пока открыта из-за неполных файловых правил."
+            )
     issues = list(
         dict.fromkeys(
             ISSUE_LABELS.get(item.get("reason"), "Остались неуточнённые условия")
