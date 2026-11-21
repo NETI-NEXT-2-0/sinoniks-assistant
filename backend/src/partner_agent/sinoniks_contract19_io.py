@@ -185,7 +185,8 @@ def assess(request: Requirements19) -> Assessment19:
             for side_index, side in enumerate(flow.sides):
                 path = root + f"/sides/{side_index}"
                 if side.manual is None and side.usb is None and not side.automations:
-                    issue(path + "/manual", "Как файлы попадают на узел и забираются с него?")
+                    issue(path + "/manual", "Как передаются файлы на этой стороне: вручную, "
+                          "автоматически из хранилища или с USB, если применимо?")
                 checks_path = path + "/checks"
                 if side.checks is None and (
                     checks_path in documented_gaps or not flow.has_declared_checks()
@@ -213,9 +214,7 @@ def assess(request: Requirements19) -> Assessment19:
                         issue(check_path,
                               "Эта проверка — пожелание вендору, а не функция продукта.",
                               "unsupported")
-    if request.manual_users is None and has_unidentified_manual_users(
-        flow for flow in request.flows if isinstance(flow, FileFlow19)
-    ):
+    if request.manual_users is None and has_unidentified_manual_users(request):
         issue("/manual_users", "Уточните число ручных пользователей для лицензии.", "optional")
     # Several file flows can refer to the same optional session-wide user count.
     issues = list({(item.path, item.kind): item for item in issues}.values())

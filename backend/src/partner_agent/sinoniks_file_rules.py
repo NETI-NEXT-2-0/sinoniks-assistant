@@ -1,7 +1,6 @@
 import hashlib
 import json
 from collections import defaultdict, deque
-from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import zip_longest
 from typing import Literal
@@ -137,6 +136,15 @@ class FileRule:
             {"from_network_id": lane.source.network_id,
              "to_network_id": lane.destination.network_id,
              "checks_by_network": lane.checks_by_network()}
+            for lane in self.lanes
+        ]
+
+    def access_directions(self) -> list[dict[str, object]]:
+        return [
+            {"from_network_id": lane.source.network_id,
+             "to_network_id": lane.destination.network_id,
+             "access_group": lane.destination.access_group,
+             "received_files_shared": lane.destination.received_files_shared}
             for lane in self.lanes
         ]
 
@@ -333,21 +341,25 @@ def _rules(buckets: dict[Profile, list[FileLane]]) -> list[list[FileLane]]:
     return result
 
 
-def has_unidentified_manual_users(flows: Iterable[FileFlow19]) -> bool:
+def has_unidentified_manual_users(request: Requirements19) -> bool:
+    people = {actor.id for actor in request.actors if not actor.is_collective()}
     return any(
         len(flow.sides) != 2 or any(
-            not side.actor_ids and (side.manual is not False or side.usb is not False)
+            people.isdisjoint(side.actor_ids)
+            and (side.manual is not False or side.usb is not False)
             for side in flow.sides
-        ) for flow in flows
+        ) for flow in request.flows if isinstance(flow, FileFlow19)
     )
 
 
 def _user_counts(
     request: Requirements19, flows: list[FileFlow19], pulls: int, incomplete: bool,
 ) -> tuple[int | None, CountRange19 | None, FileUserDetails]:
-    actors = tuple(sorted({
+    used_actors = {
         actor for flow in flows for side in flow.sides for actor in side.actor_ids
-    }))
+    }
+    actors = tuple(sorted(actor.id for actor in request.actors
+                          if actor.id in used_actors and not actor.is_collective()))
     if not flows:
         return 0, None, FileUserDetails(actors, 0, 0, ())
     declared = request.manual_users
@@ -355,7 +367,7 @@ def _user_counts(
     if declared is not None:
         manual_upper = declared.upper
     else:
-        manual_upper = None if has_unidentified_manual_users(flows) else manual_lower
+        manual_upper = None if has_unidentified_manual_users(request) else manual_lower
     reasons = []
     if manual_upper is None:
         reasons.append("manual_upper_unknown")
@@ -400,7 +412,16 @@ def calculate_file_rules(
         digest = hashlib.sha256(f"{number}:{identity}".encode()).hexdigest()[:24]
         rules.append(FileRule(f"file-{digest}", group))
     pulls = sum(lane.pull is not None for group in matched for lane in group)
-    lower_bound = max(int(bool(flows)), sum(not group[0].provisional for group in matched))
+    isolated_groups: dict[str, set[str]] = defaultdict(set)
+    for lanes in matched:
+        for lane in lanes:
+            destination = lane.destination
+            if destination.received_files_shared is False and destination.access_group is not None:
+                isolated_groups[destination.network_id].add(destination.access_group)
+    lower_bound = max(
+        int(bool(flows)), pulls, max(map(len, isolated_groups.values()), default=0),
+        sum(not any(lane.provisional for lane in group) for group in matched),
+    )
     users, user_range, user_details = _user_counts(request, flows, pulls, bool(issues))
     return FileCalculation(
         rules, list(dict.fromkeys(issues)), None if issues else len(rules),
