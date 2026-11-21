@@ -5,7 +5,7 @@ import re
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from pydantic import Field, JsonValue, ValidationError, model_validator
+from pydantic import Field, JsonValue, ValidationError, field_validator, model_validator
 
 from partner_agent.infra.errors import APIError
 from partner_agent.requirements_service import requirements_questions
@@ -50,14 +50,36 @@ class ProjectAnswer19(ProjectFieldAnswer19):
     base_revision_id: UUID
 
 
+class ProjectAnswerRemark19(StrictModel):
+    path: str = Field(min_length=1, max_length=180)
+    target_id: Identifier | None = None
+    side_network_id: Identifier | None = None
+    text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def printable_text(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("A remark must contain text")
+        value.encode("utf-8")
+        return value
+
+
 class ProjectAnswerBatch19(StrictModel):
     schema_version: Literal[1] = 1
     base_revision_id: UUID
-    answers: list[ProjectFieldAnswer19] = Field(min_length=1, max_length=64)
+    answers: list[ProjectFieldAnswer19] = Field(max_length=64)
+    remarks: list[ProjectAnswerRemark19] = Field(
+        default_factory=list, max_length=64, exclude_if=lambda values: not values,
+    )
 
     @model_validator(mode="after")
     def unique_fields(self) -> "ProjectAnswerBatch19":
-        if len({answer.path for answer in self.answers}) != len(self.answers):
+        paths = [answer.path for answer in self.answers]
+        paths.extend(remark.path for remark in self.remarks)
+        if not 1 <= len(paths) <= 64:
+            raise ValueError("Provide between 1 and 64 answers")
+        if len(set(paths)) != len(paths):
             raise ValueError("Each field must appear once in the batch")
         return self
 
@@ -74,6 +96,14 @@ def parse_project_answer(value: dict[str, Any] | None) -> ProjectAnswerCommand19
 def apply_answer(request: Requirements19, command: ProjectAnswerCommand19) -> Requirements19:
     document = request.model_dump(mode="json")
     answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    if isinstance(command, ProjectAnswerBatch19) and command.remarks:
+        targets = {
+            (item["field"], item["target_id"], item["side_network_id"])
+            for item in question_choices(request)
+        }
+        if any((item.path, item.target_id, item.side_network_id) not in targets
+               for item in command.remarks):
+            raise APIError(409, "question_context_changed", "Reload the project question")
     for answer in answers:
         _apply_field_answer(document, answer)
     try:

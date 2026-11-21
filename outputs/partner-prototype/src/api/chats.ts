@@ -11,7 +11,8 @@ export interface Snapshot { chat: Chat; branches: Branch[]; messages: Message[];
 export interface Page<T> { items: T[]; next_cursor: string | null }
 export interface Admission { run_id: string; message_id: string; status: RunStatus; queue_position: number; events_url: string; branch_id?: string; request_mode: RequestMode }
 export interface ProjectFieldAnswerInput { path: string; target_id: string | null; side_network_id: string | null; value?: unknown; unknown?: boolean }
-export type ProjectAnswerInput = { schema_version?: 1; base_revision_id: string } & (ProjectFieldAnswerInput | { answers: ProjectFieldAnswerInput[] });
+export interface ProjectAnswerRemarkInput { path: string; target_id: string | null; side_network_id: string | null; text: string }
+export type ProjectAnswerInput = { schema_version?: 1; base_revision_id: string } & (ProjectFieldAnswerInput | { answers: ProjectFieldAnswerInput[]; remarks?: ProjectAnswerRemarkInput[] });
 export interface SubmittedWishInput { kind: 'free_text'; text: string }
 export interface RunBody { branch_id: string; message: string; attachment_ids: string[]; web_mode: 'off'; request_mode: RequestMode; project_answer?: ProjectAnswerInput; vendor_wish?: SubmittedWishInput }
 export interface ResumeBody { clarification_id: string; answer: string }
