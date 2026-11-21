@@ -4,11 +4,12 @@ import re
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
+from sinoniks_reference_pages import extract_pages
+
 from partner_agent.documents.canonical import extract_utf8
 from partner_agent.documents.edited_copy import ReviewedCopy, render_copy
 from partner_agent.documents.limits import MAX_EVIDENCE_CHARS
 from partner_agent.retrieval.lexical import matched_terms, query_terms
-from sinoniks_reference_pages import extract_pages
 
 WINDOW = 1200
 STEP = 1000
