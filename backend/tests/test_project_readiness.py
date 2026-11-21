@@ -114,3 +114,15 @@ def test_solver_protected_side_assumption_is_visible_without_relabelling_open_ne
     assert result["readiness"]["status"] == "preliminary"
     assert result["readiness"]["assumptions"]
     assert all(network["trust"] == "open" for network in result["networks"])
+
+
+def test_out_of_scope_request_is_a_limitation_not_a_completed_solution():
+    raw = data_project()
+    raw["flows"] = []
+    raw["requests_for_vendor"] = [{"id": "routing", "kind": "unsupported", "flow_id": None,
+                                  "text": "Прямая маршрутизация сетей"}]
+    _, result, _ = build(raw)
+    report = result["readiness"]
+    assert report["status"] == "unsupported"
+    assert report["limitations"] and not report["conflicts"]
+    assert report["checks"][1]["status"] == "pending"
