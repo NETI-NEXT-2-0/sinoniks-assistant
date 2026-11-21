@@ -146,7 +146,7 @@ export function Workspace({ user, auth, appearance, openAppearance, logout, logo
     groups.set(key, [...(groups.get(key) ?? []), message]);
   }
   const filtered = space.chats.filter((chat) => chat.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-  const role = { admin: 'Администратор', curator: 'Администратор', user: 'Участник команды' }[user.role];
+  const role = { admin: 'Администратор', curator: 'Администратор', user: 'Пользователь' }[user.role];
   const connectionText = { connected: 'Соединение установлено', connecting: 'Подключаемся…', reconnecting: 'Восстанавливаем соединение…', closed: 'Соединение закрыто' }[space.connection];
 
   const manager = user.role === 'admin' || user.role === 'curator';
