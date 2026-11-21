@@ -178,7 +178,7 @@ def result_artifacts19(
         "json": json.dumps(result, ensure_ascii=False, indent=2) + "\n",
         "txt": text + "\n",
     }
-    if diagram_unavailability19(calculation) is None:
+    if diagram_unavailability19(request, calculation) is None:
         artifacts.update(diagram_artifacts(layout19(request, calculation)))
     return {**result, "explanation": text}, artifacts
 

@@ -116,7 +116,7 @@ export function CalculatedProject({
           У этой ревизии нет сохранённой схемы. Доступны расчёт и пояснение.
         </p>
       )}
-      <div
+      {result.rules.length > 0 && <div
         className="diagram-rule-table"
         role="region"
         aria-label="Рассчитанные правила 1.9"
@@ -178,7 +178,7 @@ export function CalculatedProject({
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       <details open>
         <summary>Почему система размещена так</summary>
         <p className="prose" style={{ whiteSpace: "pre-wrap" }}>

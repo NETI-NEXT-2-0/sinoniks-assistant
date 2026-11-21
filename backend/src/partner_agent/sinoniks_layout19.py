@@ -359,19 +359,55 @@ def _page(
     return page
 
 
-def diagram_unavailability19(result: RuleCalculation) -> str | None:
+def _topology_systems(request: Requirements19) -> list[System19]:
+    return [system for system in request.systems if system.name and system.network_id is not None]
+
+
+def _topology_pages(
+    request: Requirements19, placement: DataPlacement, names: tuple[str, str],
+) -> list[Page]:
+    systems = _topology_systems(request)
+    sides = [
+        [Endpoint(side, system.id, system.name or system.id) for system in systems
+         if system.network_id == network_id]
+        for side, network_id in (("A", placement.node_a_network_id),
+                                 ("B", placement.node_b_network_id))
+    ]
+    pages: list[Page] = []
+    for start in range(0, max(map(len, sides)), ENDPOINTS_PER_SIDE):
+        index = len(pages) + 1
+        page = Page(f"topology-{index}", f"Предварительная топология · {index}")
+        endpoints: dict[Endpoint, list[int]] = {
+            endpoint: [] for side in sides for endpoint in side[start:start + ENDPOINTS_PER_SIDE]
+        }
+        _, card_bottom = _endpoints(page, endpoints)
+        centre = max(246, card_bottom // 2 + 72)
+        bottom = max(card_bottom + 28, centre + 95)
+        _equipment(page, centre, 0, bottom, names, request.existing_firewall_name)
+        _text(page, "title", "Синоникс 1.9 · " + page.title, 26, 12, 1380,
+              color="#FFFFFF", size=22)
+        height = _text(page, "pending-rules", "Связи пока не рассчитаны. "
+                       "Уточните условия обмена, чтобы увидеть правила.", 26, bottom + 18, 1360)
+        page.height = bottom + height + 60
+        pages.append(page)
+    return pages
+
+
+def diagram_unavailability19(request: Requirements19, result: RuleCalculation) -> str | None:
     rule_count = len(result.data.rules) + len(result.files.rules)
     if result.data.placement is None:
         return "A protected network is required for the diagram"
     if result.capacity_exceeded or rule_count > RULE_LIMIT:
         return "The selected rules exceed a single appliance diagram"
-    if not rule_count:
-        return "The diagram requires at least one calculated rule"
+    if not rule_count and (
+        not all(network.name for network in request.networks) or not _topology_systems(request)
+    ):
+        return "The diagram requires named networks and at least one known system or rule"
     return None
 
 
 def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, object]:
-    error = diagram_unavailability19(result)
+    error = diagram_unavailability19(request, result)
     if error:
         raise ValueError(error)
     placement = result.data.placement
@@ -387,7 +423,7 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
     pages = [
         _page(rules[start:start + RULES_PER_PAGE], names, count, request.existing_firewall_name)
         for start in range(0, len(rules), RULES_PER_PAGE)
-    ]
+    ] if rules else _topology_pages(request, placement, names)
     firewall = existing_firewall_details(request)
     return {
         "schema_version": 1, "design_id": request.id, "background": BACKGROUND,
