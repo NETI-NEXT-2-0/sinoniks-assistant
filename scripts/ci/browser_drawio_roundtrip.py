@@ -7,12 +7,11 @@ from pathlib import Path
 from threading import Thread
 from xml.etree.ElementTree import Element, fromstring
 
-from playwright.sync_api import Page, Route, expect, sync_playwright
-
 from partner_agent.sinoniks_calculation import solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_export import scene_drawio
 from partner_agent.sinoniks_layout19 import layout19
+from playwright.sync_api import Page, Route, expect, sync_playwright
 
 INITIAL_NAME = "Сервер времени"
 EDITED_NAME = "Сервер & <архив>"
@@ -112,9 +111,9 @@ def save_editor(page: Page) -> str:
     ).json_value()
 
 
-def rename_and_move(page: Page) -> None:
+def rename_and_move(page: Page, original_name: str) -> None:
     frame = page.frame_locator("#editor")
-    frame.get_by_text(INITIAL_NAME, exact=True).dblclick()
+    frame.get_by_text(original_name, exact=True).dblclick()
     frame.locator(".mxCellEditor[contenteditable=true]").fill(EDITED_NAME)
     page.keyboard.press("Control+Enter")
     renamed = frame.get_by_text(EDITED_NAME, exact=True)
@@ -152,13 +151,14 @@ def edge_styles(root: Element) -> dict[str, dict[str, str | None]]:
     return result
 
 
-def check_exports(original: str, saved: str, reopened: str) -> None:
+def check_exports(original: str, saved: str, reopened: str, original_name: str) -> None:
     initial, edited, resaved = (fromstring(xml) for xml in (original, saved, reopened))
-    start_cell = initial.find(f".//mxCell[@value='{INITIAL_NAME}']")
+    start_cell = next((cell for cell in initial.findall(".//mxCell")
+                       if cell.get("value") == original_name), None)
     assert start_cell is not None, "Editable system missing from export"
     cell_path = f".//mxCell[@id='{start_cell.attrib['id']}']"
     rules = json.loads(initial.attrib["data-rule-rows"])
-    assert len(rules) == 3, "Expected three acceptance rule rows"
+    assert rules, "Expected at least one acceptance rule row"
     links = connections(initial)
     for edge in initial.findall(".//mxCell[@edge='1']"):
         if edge.attrib["id"].endswith("-usb"):
@@ -176,7 +176,10 @@ def check_exports(original: str, saved: str, reopened: str) -> None:
         assert edge_styles(root) == edge_styles(initial), "Rule colors or directions changed"
 
 
-def roundtrip(origin: str, channel: str | None, original: str) -> None:
+def roundtrip(
+    origin: str, channel: str | None, original: str, original_name: str,
+    screenshots_dir: Path | None,
+) -> None:
     def route_local(route: Route) -> None:
         if route.request.url.startswith(origin + "/"):
             route.continue_()
@@ -193,14 +196,18 @@ def roundtrip(origin: str, channel: str | None, original: str) -> None:
         context.route("**/*", route_local)
         page = context.new_page()
         open_editor(page, origin, original)
-        rename_and_move(page)
+        if screenshots_dir:
+            page.screenshot(path=str(screenshots_dir / "drawio-before-edit.png"))
+        rename_and_move(page, original_name)
         saved = save_editor(page)
 
         reopened = context.new_page()
         open_editor(reopened, origin, saved)
         frame = reopened.frame_locator("#editor")
         expect(frame.get_by_text(EDITED_NAME, exact=True)).to_be_visible()
-        check_exports(original, saved, save_editor(reopened))
+        if screenshots_dir:
+            reopened.screenshot(path=str(screenshots_dir / "drawio-reopened.png"))
+        check_exports(original, saved, save_editor(reopened), original_name)
         browser.close()
 
 
@@ -208,10 +215,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("editor_dir", type=Path)
     parser.add_argument("--channel", help="Installed Chromium channel, for example msedge")
-    parser.add_argument("--input", type=Path, help="Downloaded three-rule acceptance export")
+    parser.add_argument("--input", type=Path, help="Downloaded acceptance export")
+    parser.add_argument("--system-name", default=INITIAL_NAME, help="Exact editable system label")
+    parser.add_argument("--screenshots-dir", type=Path, help="Directory for browser evidence")
     options = parser.parse_args()
     if not (options.editor_dir / "index.html").is_file():
         parser.error("editor_dir must point to the draw.io webapp directory")
+    if options.screenshots_dir:
+        options.screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     handler = partial(EditorHandler, directory=str(options.editor_dir.resolve()))
     with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
@@ -220,7 +231,8 @@ def main() -> None:
         try:
             original = (options.input.read_text(encoding="utf-8") if options.input
                         else synthetic_export())
-            roundtrip(f"http://127.0.0.1:{server.server_port}", options.channel, original)
+            roundtrip(f"http://127.0.0.1:{server.server_port}", options.channel, original,
+                      options.system_name, options.screenshots_dir)
         finally:
             server.shutdown()
             worker.join()
