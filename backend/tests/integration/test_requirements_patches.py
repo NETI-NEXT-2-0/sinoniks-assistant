@@ -149,3 +149,22 @@ async def test_compound_edit_preserves_tcp_intent_until_direction_is_known(plane
     snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
     answer = next(m["content"] for m in snapshot["messages"] if m["role"] == "assistant")
     assert "Уточните:" in answer and "TCP" in answer
+
+
+async def test_finishing_exchange_for_existing_server_does_not_duplicate_it(plane, monkeypatch):
+    client, headers, chat, base, branch, first = await arrange(plane, monkeypatch)
+    added = deepcopy(first["input"])
+    added["systems"].append({"id": "garage", "name": "Сервер сервиса", "network_id": "office"})
+    existing = (await save(client, headers, base, branch, added, parent=first["id"])).json()
+    provider(monkeypatch, [{"op": "add", "collection": "flows", "id": "tcp-service",
+                            "values": {"kind": "data", "protocol": "TCP", "mode": "two-way",
+                                       "destination_port": 8443, "sender_network_id": "plant",
+                                       "receiver_network_id": "office", "sender_ids": ["sender"],
+                                       "receiver_ids": ["garage"], "purpose": "Диагностика"}}])
+    accepted = (await submit(client, headers, chat, text="Завершить обмен с сервером")).json()
+    await execute_run(UUID(accepted["run_id"]), dispatch_generation=0)
+    latest = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
+    assert latest["parent_id"] == existing["id"]
+    assert len(latest["input"]["systems"]) == 3
+    assert len(latest["input"]["flows"]) == 2
+    assert latest["result"]["confirmed_rules_count"] == 2
