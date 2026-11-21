@@ -105,6 +105,10 @@ class FileRule:
     lanes: list[FileLane]
 
     @property
+    def flow_ids(self) -> list[str]:
+        return sorted({flow.id for lane in self.lanes for flow in lane.flows})
+
+    @property
     def direction(self) -> Literal["forward", "both"]:
         return "both" if len(self.lanes) == 2 else "forward"
 

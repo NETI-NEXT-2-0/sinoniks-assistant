@@ -47,6 +47,9 @@ class DisplayRule:
     policy: str
     protocol: str | None
     destination_port: int | None
+    flow_ids: list[str]
+    from_network_id: str
+    to_network_id: str
     file: bool = False
     provisional: bool = False
     primary_senders: list[Endpoint] | None = None
@@ -55,6 +58,8 @@ class DisplayRule:
     def table_row(self) -> dict[str, object]:
         return {
             "id": self.id, "number": self.number, "sender_side": self.sender_side,
+            "flow_ids": self.flow_ids,
+            "from_network_id": self.from_network_id, "to_network_id": self.to_network_id,
             "senders": [endpoint.label for endpoint in (self.primary_senders or self.senders)],
             "receiver": ", ".join(endpoint.label
                                   for endpoint in (self.primary_receivers or self.receivers)),
@@ -108,7 +113,9 @@ class LayoutContext:
             rule.id, number, senders[0].side, senders, receivers, rule.mode == "two-way", label,
             ", ".join(sorted(rule.purposes)) or (
                 "Синхронизация времени" if rule.application == "ntp" else "Передача данных"
-            ), rule.policy or "", rule.protocol, rule.port, provisional=rule.protocol is None,
+            ), rule.policy or "", rule.protocol, rule.port,
+            sorted(rule.flow_ids), rule.from_network_id, rule.to_network_id,
+            provisional=rule.protocol is None,
         )
 
     def file(self, rule: FileRule, number: int) -> DisplayRule:
@@ -139,9 +146,10 @@ class LayoutContext:
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),
             list(dict.fromkeys(receivers)), rule.direction == "both", description,
             ", ".join(sorted(purposes)) or "Передача файлов",
-            lane.flows[0].policy or "", description, None, True,
-            any(direction.provisional for direction in rule.lanes),
-            primary_senders, primary_receivers,
+            lane.flows[0].policy or "", description, None, rule.flow_ids,
+            lane.source.network_id, lane.destination.network_id, file=True,
+            provisional=any(direction.provisional for direction in rule.lanes),
+            primary_senders=primary_senders, primary_receivers=primary_receivers,
         )
 
 
