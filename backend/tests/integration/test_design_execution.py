@@ -67,8 +67,10 @@ async def test_large_project_round_trip_and_local_overflow_do_not_spend_or_chang
         overflow = overflow_response.json()
         assert (await execute_run(UUID(overflow["run_id"]), dispatch_generation=0))[
             "status"
-        ] == "failed"
+        ] == "succeeded"
         outcome = (await client.get(f"/api/v1/runs/{overflow['run_id']}")).json()["outcome"]
+        assert outcome["response_status"] == "needs_clarification"
+        assert outcome["task_completed"] is False
         assert outcome["code"] == "rag_context_limit" and len(calls) == 1
         async with session_factory()() as db:
             after = await db.scalar(select(ModelUsageDaily).where(ModelUsageDaily.model == name))
@@ -155,7 +157,9 @@ async def test_unapplied_chat_edit_keeps_the_saved_revision(plane, monkeypatch, 
         assistant, = [item for item in snapshot["messages"] if item["role"] == "assistant"]
         assert assistant["content"].startswith("Изменения по этому запросу не сохранены.")
     else:
-        assert result["status"] == "failed"
+        assert result["status"] == "succeeded"
+        assert run["outcome"]["response_status"] == "needs_clarification"
+        assert run["outcome"]["task_completed"] is False
         assert run["outcome"]["code"] == "provider_incomplete_response"
     assert "design_id" not in run["outcome"]
     latest = (await client.get(design_url + "/latest", params={"branch_id": branch})).json()

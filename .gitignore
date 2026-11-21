@@ -20,3 +20,4 @@ outputs/partner-prototype/dist/
 output/playwright/
 parser/.venv/
 /.ci-compose.yaml
+/.pilot-compose.yaml
