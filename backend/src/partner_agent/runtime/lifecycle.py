@@ -13,6 +13,7 @@ from partner_agent.design_service import capture_design_context, create_revision
 from partner_agent.infra.db import session_factory
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import User
+from partner_agent.infra.models_designs import DesignRevision
 from partner_agent.infra.models_stage2 import (
     ContextManifest,
     Message,
@@ -21,6 +22,7 @@ from partner_agent.infra.models_stage2 import (
     RunAttempt,
 )
 from partner_agent.infra.settings import get_settings
+from partner_agent.project_change_receipt import change_receipt
 from partner_agent.requirements_service import requirements_answer
 from partner_agent.retrieval.service import validate_evidence_access
 from partner_agent.runs.service import (
@@ -225,6 +227,8 @@ async def complete(
             if run.request_mode == "reference":
                 raise APIError(409, "request_mode_violation", "Reference cannot change a project")
             await assert_ownership(db, run, ownership)
+            previous = (await db.get(DesignRevision, design_parent_id)
+                        if design_parent_id is not None else None)
             row = await create_revision(
                 db, chat_id=chat.id, branch_id=run.branch_id, parent_id=design_parent_id,
                 conditions=design_input, key=run.id,
@@ -246,6 +250,10 @@ async def complete(
                            and not question.get("answered_unknown")]
                 if pending:
                     text += "\n\nУточните:\n" + "\n".join(f"• {item}" for item in pending)
+                changes, receipt = change_receipt(previous.input if previous else None, row.input)
+                outcome = {**outcome, "design_changes": changes}
+                if previous is not None and receipt:
+                    text = "Сохранённые изменения:\n" + receipt + "\n\n" + text
             elif row.questions:
                 text = "Сохранил условия проекта. Для продолжения уточните:\n\n" + "\n".join(
                     f"• {question['text']}" for question in row.questions

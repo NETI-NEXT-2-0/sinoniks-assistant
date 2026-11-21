@@ -131,6 +131,8 @@ async def execute_run(
                         str(question), evidence, history, design_context=project_context,
                         project_calculation=calculation, request_mode=current_run.request_mode,
                         new_project=new_project,
+                        context_window_tokens=settings.model_context_window_tokens,
+                        max_output_tokens=settings.model_max_output_tokens,
                     )
                     evidence = prepared.evidence
                     estimate = reservation_cost_usd(settings)

@@ -260,6 +260,7 @@ def _segment(
 def _page(
     rules: list[DisplayRule], names: tuple[str, str], count_text: str,
     existing_firewall_name: str | None,
+    extras: list[Endpoint] | None = None,
 ) -> Page:
     start, end = rules[0].number, rules[-1].number
     page = Page(f"rules-{start}", f"Правила {start}–{end}")
@@ -269,6 +270,8 @@ def _page(
     for rule in rules:
         for endpoint in branches[rule.number]:
             (usb if endpoint.usb else regular)[endpoint].append(rule.number)
+    for endpoint in extras or []:
+        regular.setdefault(endpoint, [])
     cards, card_bottom = _endpoints(page, regular)
     centre = max(246, card_bottom // 2 + 72)
     usb_rules = [number for number, arms in branches.items() if any(item.usb for item in arms)]
@@ -365,8 +368,10 @@ def _topology_systems(request: Requirements19) -> list[System19]:
 
 def _topology_pages(
     request: Requirements19, placement: DataPlacement, names: tuple[str, str],
+    *, systems: list[System19] | None = None,
 ) -> list[Page]:
-    systems = _topology_systems(request)
+    supplementary = systems is not None
+    systems = _topology_systems(request) if systems is None else systems
     sides = [
         [Endpoint(side, system.id, system.name or system.id) for system in systems
          if system.network_id == network_id]
@@ -376,7 +381,9 @@ def _topology_pages(
     pages: list[Page] = []
     for start in range(0, max(map(len, sides)), ENDPOINTS_PER_SIDE):
         index = len(pages) + 1
-        page = Page(f"topology-{index}", f"Предварительная топология · {index}")
+        title = ("Устройства без рассчитанных связей" if supplementary
+                 else "Предварительная топология")
+        page = Page(f"topology-{index}", f"{title} · {index}")
         endpoints: dict[Endpoint, list[int]] = {
             endpoint: [] for side in sides for endpoint in side[start:start + ENDPOINTS_PER_SIDE]
         }
@@ -386,8 +393,11 @@ def _topology_pages(
         _equipment(page, centre, 0, bottom, names, request.existing_firewall_name)
         _text(page, "title", "Синоникс 1.9 · " + page.title, 26, 12, 1380,
               color="#FFFFFF", size=22)
-        height = _text(page, "pending-rules", "Связи пока не рассчитаны. "
-                       "Уточните условия обмена, чтобы увидеть правила.", 26, bottom + 18, 1360)
+        hint = ("Связи этих устройств пока не рассчитаны. " if supplementary
+                else "Связи пока не рассчитаны. ")
+        height = _text(page, "pending-rules", hint +
+                       "Уточните условия обмена, чтобы увидеть правила.",
+                       26, bottom + 18, 1360)
         page.height = bottom + height + 60
         pages.append(page)
     return pages
@@ -420,10 +430,29 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
     names = (networks[placement.node_a_network_id], networks[placement.node_b_network_id])
     count = (f"Правил Синоникса: {result.minimum}" if result.minimum is not None else
              f"Предварительный расчёт · минимум {result.lower_bound}")
+    used = {endpoint.id for rule in rules for endpoint in [*rule.senders, *rule.receivers]}
+    unconnected = [system for system in _topology_systems(request) if system.id not in used]
+    extras: list[Endpoint] = []
+    overflow: list[System19] = []
+    if rules:
+        first_arms = {endpoint for rule in rules[:RULES_PER_PAGE] for endpoint in _arms(rule)
+                      if not endpoint.usb}
+        sizes = {side: sum(endpoint.side == side for endpoint in first_arms) for side in ("A", "B")}
+        for system in unconnected:
+            side = "A" if system.network_id == placement.node_a_network_id else "B"
+            if sizes[side] >= ENDPOINTS_PER_SIDE:
+                overflow.append(system)
+                continue
+            extras.append(Endpoint(side, system.id,
+                                   f"{system.name or system.id}\nОбмен не рассчитан"))
+            sizes[side] += 1
     pages = [
-        _page(rules[start:start + RULES_PER_PAGE], names, count, request.existing_firewall_name)
+        _page(rules[start:start + RULES_PER_PAGE], names, count,
+              request.existing_firewall_name, extras if start == 0 else None)
         for start in range(0, len(rules), RULES_PER_PAGE)
     ] if rules else _topology_pages(request, placement, names)
+    if overflow:
+        pages.extend(_topology_pages(request, placement, names, systems=overflow))
     firewall = existing_firewall_details(request)
     return {
         "schema_version": 1, "design_id": request.id, "background": BACKGROUND,

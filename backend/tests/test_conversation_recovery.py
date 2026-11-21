@@ -42,6 +42,7 @@ def test_saved_diagram_side_mapping_uses_placement_not_network_list_order():
         questions=[],
         input={
             "schema_version": 3,
+            "id": "saved-project",
             "networks": [{"id": "closed", "name": "Цех"}, {"id": "open", "name": "Офис"}],
         },
         result={

@@ -2,6 +2,7 @@
 
 import json
 import math
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
@@ -9,6 +10,12 @@ from pydantic import ValidationError
 
 from partner_agent.documents.edited_copy import MAX_SECTION_TITLE
 from partner_agent.infra.settings import Settings
+from partner_agent.requirements_patch import (
+    PatchError,
+    apply_patch,
+    compact_project,
+    normalize_optional_text,
+)
 from partner_agent.requirements_service import without_sources
 from partner_agent.runs.types import RequestMode
 from partner_agent.runtime.provider import (
@@ -140,6 +147,7 @@ class PreparedRequest:
     can_explain_project: bool
     input_version: int = 2
     citation_aliases: dict[str, str] = field(default_factory=dict)
+    patch_base: dict[str, Any] | None = None
 
 
 class ProviderOptions(TypedDict, total=False):
@@ -154,6 +162,7 @@ def prepare_request(
     *, design_context: dict[str, Any] | None = None,
     project_calculation: dict[str, Any] | None = None,
     request_mode: RequestMode = "auto", new_project: bool = False,
+    context_window_tokens: int = 0, max_output_tokens: int = 0,
 ) -> PreparedRequest:
     if not question.strip() or len(evidence) > 20:
         raise ProviderError("rag_context_invalid")
@@ -172,7 +181,10 @@ def prepare_request(
             label += f" (page snapshot captured {item['web_source']['captured_on']})"
         title = item.get("title")
         source_title = f" Source title: {title[:200]}." if isinstance(title, str) else ""
-        blocks.append(f"[source_{index}]{label}{source_title} {excerpt}")
+        locator = item.get("locator")
+        location = citation_location(locator) if isinstance(locator, dict) else None
+        source_location = f" Source locator: {location}." if location else ""
+        blocks.append(f"[source_{index}]{label}{source_title}{source_location} {excerpt}")
     instruction = (
         "Reply in the user's language. For small talk, brainstorming and general knowledge, "
         "converse without requiring evidence or claiming human experiences. "
@@ -198,6 +210,10 @@ def prepare_request(
         "A short user reply can answer your previous clarification: combine the current "
         "reply with the latest pending request in dialogue before choosing the response mode. "
         "Omitted excerpts are not proof of absence. "
+        "Use Source title and Source locator to identify the actual file and verified "
+        "page range when asked; copy the filename exactly instead of guessing or denying "
+        "metadata that is present. A PDF page range does not establish a separately printed "
+        "slide number; report the verified range and distinguish any unverified numbering. "
         "Evidence titles identify source versions: for case constraints prefer supplied "
         "Sinoniks 1.9 scope and methodology over older manuals or marketing. General "
         "protocol documentation never proves that a feature is supported by Sinoniks."
@@ -244,6 +260,7 @@ def prepare_request(
             "directly route the networks are outside this exchange design: explain the limit, "
             "return insufficient with design=null, and preserve the valid project. "
             "Never invent known values. "
+            "Unknown nullable labels (name, purpose, policy, details) must be null, never ''. "
             "New entities need unique temporary IDs and valid references; the server assigns "
             "their permanent IDs. Return no sources anywhere. Never alter legacy metadata. "
             "Optional protected_network_id:null|string records an explicitly agreed protected "
@@ -301,6 +318,52 @@ def prepare_request(
             "from network names or old firewall positions. Do not compute a rule count, topology "
             "or XML. v3 is requirements only; the server computes architecture after validation. "
         ) + instruction[end:]
+    if input_version == 3 and not new_project:
+        instruction = instruction.replace(
+            "return mode=design with the COMPLETE updated conditions.",
+            "return mode=design with addressed changes in design_patch.",
+        ).replace(
+            "Return the COMPLETE updated saved document with schema_version=3, product_version=1.9 "
+            "(string), the SAME project id and all unchanged entity IDs. "
+            "Do not return a v2 input. ",
+            "For edits return design=null and design_patch, not the full document. ",
+        )
+        instruction += (
+            " EDIT CONTRACT: design_patch={operations:[{op:'add'|'update'|'remove',"
+            "collection:'networks'|'systems'|'flows'|'actors'|'requests_for_vendor'|'project',"
+            "id:string|null,values:{changed_field:value}}]}. At most 64 operations. "
+            "Address saved entities by exact id, never an array index or name. "
+            "An update supplies ONLY changed fields; omitted fields are preserved. "
+            "An add supplies a unique temporary ASCII id and new entity fields. "
+            "A remove supplies values={}. Combine changes to one entity in a single operation. "
+            "Project updates use id=null and only manual_users, protected_network_id, "
+            "existing_firewall_name, unknowns or assumptions. Never send id/schema_version/"
+            "product_version/legacy/sources inside values. Never change an entity kind. "
+            "Deleting a referenced entity requires updates to its dependent references; "
+            "do not delete unrelated exchanges. Adding a computer alone does not include "
+            "it in existing flows unless the user requests that. "
+            "The compact view omits default-valued fields; absent fields retain their "
+            "contract defaults, not inferred known values. checks=[] means explicitly none; "
+            "checks=null means unknown. For explanation, clarification or refusal return "
+            "design=null and design_patch=null. The server applies operations atomically "
+            "to the captured revision, validates, calculates and saves a new revision. "
+            "Example: design_patch={operations:[{op:'update',collection:'systems',"
+            "id:'saved-system-id',values:{name:'Новое имя'}}]}."
+            " MULTI-PART REQUESTS: account for EVERY requested change before returning. "
+            "'Add a server and connect it over TCP' requires both a system and a NEW flow; "
+            "do not stop after adding the system or overwrite the unrelated UDP flow. "
+            "Incomplete exchange conditions are supported: save a data flow with protocol=TCP "
+            "and null unknown mode/port/purpose/direction; never discard the exchange because "
+            "some parameters are missing. The server asks about these unknowns. "
+            "If direction is ambiguous, do not guess sender/receiver roles: keep those fields "
+            "null/empty and record the explicitly named pair in the flow's purpose, "
+            "so the clarification preserves both intended endpoints. "
+            "A request to connect through Sinoniks means an exchange, not a bypass cable. "
+            "Check that operations cover every clause of the user's request."
+            " When an added device already exists in this project, reuse its saved ID "
+            "unless the user explicitly requests another distinct device. A repeated "
+            "'add and connect' request must finish the missing exchange, not duplicate the device."
+        )
     if new_project:
         instruction += (
             " The supplied v3 scaffold is an UNSAVED NEW PROJECT, not an existing design. "
@@ -346,14 +409,25 @@ def prepare_request(
         for index, item in enumerate(turns)
     ):
         raise ProviderError("rag_history_invalid")
-    turns = [{"role": item["role"], "content": item["content"]} for item in turns[-20:]]
+    # Drop duplicate complete exchanges, never individual messages. Keep the
+    # current question verbatim; it need not also occupy the history window.
+    pairs: list[list[dict[str, str]]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for index in range(len(turns) - 2, -1, -2):
+        pair = turns[index:index + 2]
+        key = (pair[0]["content"], pair[1]["content"])
+        if pair[0]["content"] == question or key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        pairs.append(pair)
+    turns = [dict(item) for pair in reversed(pairs[:10]) for item in pair]
     project = ""
     if design_context is not None:
         label = ("Read-only saved project conditions" if request_mode == "reference" else
                  "New draft requirements (not yet saved)" if new_project
                  else "Saved project conditions")
         project = "\n" + label + ":\n" + json.dumps(
-            design_context, ensure_ascii=False, separators=(",", ":"),
+            compact_project(design_context), ensure_ascii=False, separators=(",", ":"),
         )
     calculation = ""
 
@@ -369,7 +443,17 @@ def prepare_request(
         ]
 
     def fits(messages: list[dict[str, str]]) -> bool:
-        return len(json.dumps(messages, ensure_ascii=False)) <= 32000
+        serialized = json.dumps(messages, ensure_ascii=False)
+        # An undeclared window retains the legacy bound. A declared window
+        # admits larger complete projects, with a separate conservative token
+        # bound: every UTF-8 byte may consume a token, plus message overhead.
+        # Never truncate a project's arrays or lower-priority source excerpts.
+        remaining = min(context_window_tokens - max_output_tokens, 256000)
+        char_limit = min(256000, remaining) if context_window_tokens else 32000
+        return len(serialized) <= char_limit and (
+            not context_window_tokens
+            or len(serialized.encode("utf-8")) + 64 * len(messages) <= remaining
+        )
 
     if not fits(messages_for([], [])):
         raise ProviderError("rag_context_limit")
@@ -393,6 +477,19 @@ def prepare_request(
         calculation = "\nSaved calculation snapshot:\n" + json.dumps(
             project_calculation, ensure_ascii=False, separators=(",", ":"),
         )
+        if not fits(messages_for([], [])) and isinstance(project_calculation.get("rules"), list):
+            # Full exported rules duplicate condition details already present
+            # in the compact project. Keep calculated counts, placement and
+            # every rule-to-flow link before falling back to conditions only.
+            summary = {**project_calculation, "rules": [
+                {key: rule[key] for key in (
+                    "id", "rule_id", "type", "flow_ids", "requirement_ids",
+                ) if key in rule}
+                for rule in project_calculation["rules"] if isinstance(rule, dict)
+            ]}
+            calculation = "\nSaved calculation snapshot:\n" + json.dumps(
+                summary, ensure_ascii=False, separators=(",", ":"),
+            )
         if not fits(messages_for([], [])):
             instruction = base_instruction
             calculation = ""
@@ -417,6 +514,7 @@ def prepare_request(
         input_version,
         {f"source_{index}": item["evidence_id"]
          for index, item in enumerate(selected_evidence, 1)},
+        deepcopy(design_context) if input_version == 3 and not new_project else None,
     )
 
 
@@ -486,6 +584,8 @@ async def answer_with_provider(
     """Run one bounded provider RAG call over a pre-authorized snapshot."""
     request = prepared or prepare_request(
         question, evidence, history, design_context=design_context, request_mode=request_mode,
+        context_window_tokens=settings.model_context_window_tokens,
+        max_output_tokens=settings.model_max_output_tokens,
     )
     if request.request_mode != request_mode:
         raise ProviderError("provider_request_mode_violation")
@@ -508,6 +608,14 @@ async def answer_with_provider(
         if mode == "grounded" and not validated["citations"]:
             raise ProviderError("provider_missing_grounded_citation")
         proposal = decoded.get("design")
+        patch = decoded.get("design_patch")
+        if patch is not None:
+            if (mode != "design" or proposal is not None or request_mode == "reference"
+                    or request.patch_base is None):
+                raise ProviderError("provider_invalid_design_patch")
+            proposal = without_sources(
+                apply_patch(request.patch_base, patch).model_dump(mode="json"),
+            )
         if request_mode == "reference" and (
             mode == "design" or proposal is not None
         ):
@@ -525,6 +633,7 @@ async def answer_with_provider(
             if request.input_version == 3:
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
+                proposal = normalize_optional_text(proposal)
                 try:
                     conditions = Requirements19.model_validate(proposal)
                 except ValidationError as invalid:
@@ -544,9 +653,9 @@ async def answer_with_provider(
                 raise ProviderError("provider_invalid_design_provenance")
         elif proposal is not None:
             raise ProviderError("provider_invalid_design_mode")
-    except (ProviderError, json.JSONDecodeError, ValidationError) as exc:
+    except (ProviderError, json.JSONDecodeError, ValidationError, PatchError) as exc:
         code = (exc.code if isinstance(exc, ProviderError) else
-                "provider_invalid_design" if isinstance(exc, ValidationError)
+                "provider_invalid_design" if isinstance(exc, (ValidationError, PatchError))
                 else "provider_invalid_rag_json")
         diagnostics: dict[str, Any] = (
             safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)

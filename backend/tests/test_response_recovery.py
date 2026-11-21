@@ -13,6 +13,7 @@ from partner_agent.runtime.recovery import recovery_message
         "provider_request_failed",
         "provider_daily_cap_exceeded",
         "provider_request_cap_exceeded",
+        "rag_context_limit",
     ],
 )
 def test_expected_provider_failures_have_plain_text_guidance(code):

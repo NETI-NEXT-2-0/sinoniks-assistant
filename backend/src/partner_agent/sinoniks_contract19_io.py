@@ -167,7 +167,8 @@ def assess(request: Requirements19) -> Assessment19:
                     field == "mode" and flow.protocol in {"MQTT", "Modbus TCP", "МЭК 104"}
                 )
                 if getattr(flow, field) is None and not known_fact:
-                    issue(root + "/" + field, "Уточните протокол и необходимость ответа.")
+                    issue(root + "/" + field, "Нужны ли ответные пакеты?" if field == "mode"
+                          else "Какой протокол используется для этого обмена?")
             if flow.protocol in {"MQTT", "Modbus TCP", "МЭК 104"} and flow.mode == "one-way":
                 issue(root + "/mode", "Промышленный протокол требует двунаправленного режима.",
                       "conflict")
