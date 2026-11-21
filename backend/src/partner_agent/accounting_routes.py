@@ -52,6 +52,10 @@ def summarize(calls: list[dict[str, Any]]) -> dict[str, Any]:
 async def session_accounting(chat_id: UUID, request: Request, db: DB) -> dict[str, Any]:
     _, actor = await authenticated(request, db)
     await lock_chat(db, chat_id, actor)
+    return await read_session_accounting(chat_id, db)
+
+
+async def read_session_accounting(chat_id: UUID, db: DB) -> dict[str, Any]:
     runs = list((await db.scalars(select(Run).where(Run.chat_id == chat_id)
                                  .order_by(Run.created_at))).all())
     rows = list((await db.scalars(select(ModelCall).join(Run, Run.id == ModelCall.run_id)

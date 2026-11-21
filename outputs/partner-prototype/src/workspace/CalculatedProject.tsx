@@ -31,8 +31,9 @@ export function CalculatedProject({
     setBusy(true);
     setError("");
     try {
+      const query = extension === "json" ? "?include_accounting=true" : "";
       const file = await auth.download(
-        `/chats/${chatId}/designs/${revision.id}/download/${extension}`,
+        `/chats/${chatId}/designs/${revision.id}/download/${extension}${query}`,
       );
       const url = URL.createObjectURL(file.blob),
         a = document.createElement("a");
