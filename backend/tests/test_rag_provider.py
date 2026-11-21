@@ -23,6 +23,19 @@ def test_build_messages_and_validate_allowed_citation():
     assert result["answer"] == "Course"
 
 
+def test_source_filename_and_verified_page_locator_are_visible_to_model():
+    request = prepare_request("Назови файл и страницы", [{
+        "evidence_id": "allowed", "excerpt": "Описание режима Тамбур.",
+        "title": "Синоникс_Техническая.pdf · проверенный конспект",
+        "locator": {"reviewed_copy": True, "section": "Страницы 5–8: режимы"},
+    }])
+    assert "Source title: Синоникс_Техническая.pdf" in request.messages[-1]["content"]
+    assert "Source locator: Раздел проверенной редакции: Страницы 5–8" in (
+        request.messages[-1]["content"]
+    )
+    assert "A PDF page range does not establish" in request.messages[0]["content"]
+
+
 def test_reference_prompt_includes_only_readonly_project_context():
     messages = build_messages("Product question", [], design_context={"network_a": "Saved plant"},
                               request_mode="reference")
