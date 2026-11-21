@@ -34,6 +34,7 @@ from partner_agent.runtime.rag_provider import (
     answer_with_provider,
     prepare_request,
 )
+from partner_agent.runtime.recovery import recovery_message
 
 
 async def execute_run(
@@ -204,8 +205,18 @@ async def execute_run(
             if usage:
                 failure.update(usage=usage, estimated_cost_usd=actual_cost,
                                usage_complete=actual_cost is not None)
+            message = (recovery_message(str(code))
+                       if isinstance(error, (ProviderError, TimeoutError))
+                       or (isinstance(error, APIError) and code == "request_mode_violation")
+                       else None)
+            if message is not None:
+                failure.update(answer_mode="insufficient", response_status="needs_clarification",
+                               task_completed=False, citations=[])
             try:
-                status = await complete(claim.ownership, "failed", failure)
+                status = await complete(
+                    claim.ownership, "succeeded" if message is not None else "failed", failure,
+                    text=message, evidence=[] if message is not None else None,
+                )
             except (StaleOwnership, APIError):
                 status = "ownership_lost"
             return {"status": status, "run_id": str(run_id)}

@@ -30,10 +30,11 @@ async def cited_run(corpus, monkeypatch):
     configure_execution(monkeypatch)
 
     async def model(settings, messages):
-        assert str(unit) in messages[-1]["content"]
+        assert "[source_1]" in messages[-1]["content"]
+        assert str(unit) not in messages[-1]["content"]
         return {"choices": [{"message": {"content": json.dumps({
             "answer": "Synthetic course costs 100.", "mode": "grounded", "citations": [{
-                "evidence_id": str(unit), "quote": "course costs 100.",
+                "evidence_id": "source_1", "quote": "course costs 100.",
                 "title": "Forged title", "location": "Forged page",
             }],
         })}}]}

@@ -79,6 +79,8 @@ async def read_session_accounting(chat_id: UUID, db: DB) -> dict[str, Any]:
     )).all()}
     observed = {**timings, **full}
     turns = [{"turn_id": str(run.id), "status": run.status,
+              "response_status": (run.outcome or {}).get("response_status"),
+              "task_completed": (run.outcome or {}).get("task_completed"),
               "elapsed_ms": observed.get(run.id),
               "card_elapsed_ms": timings.get(run.id), "full_elapsed_ms": full.get(run.id),
               "timing_scope": ("full_result" if run.id in full else
