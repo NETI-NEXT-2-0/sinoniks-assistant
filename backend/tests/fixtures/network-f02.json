@@ -1,0 +1,137 @@
+{
+  "schema_version": 3,
+  "product_version": "1.9",
+  "id": "acceptance-network",
+  "networks": [
+    {
+      "id": "outer",
+      "name": "Общая сеть",
+      "trust": "open",
+      "sources": []
+    },
+    {
+      "id": "inner",
+      "name": "Закрытая станция",
+      "trust": "closed",
+      "sources": []
+    }
+  ],
+  "systems": [
+    {
+      "id": "dispatch",
+      "network_id": "outer",
+      "name": "Диспетчер",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    },
+    {
+      "id": "collector",
+      "network_id": "outer",
+      "name": "Сервер журналов",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    },
+    {
+      "id": "clock",
+      "network_id": "outer",
+      "name": "Сервер времени",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    },
+    {
+      "id": "device-0",
+      "network_id": "inner",
+      "name": "Устройство 0",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    },
+    {
+      "id": "device-1",
+      "network_id": "inner",
+      "name": "Устройство 1",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    },
+    {
+      "id": "device-2",
+      "network_id": "inner",
+      "name": "Устройство 2",
+      "kind": "system",
+      "attachment": null,
+      "sources": []
+    }
+  ],
+  "flows": [
+    {
+      "id": "control",
+      "sender_network_id": "outer",
+      "receiver_network_id": "inner",
+      "sender_ids": [
+        "dispatch"
+      ],
+      "receiver_ids": [
+        "device-0"
+      ],
+      "requirement_ids": [],
+      "purpose": null,
+      "policy": null,
+      "sources": [],
+      "kind": "data",
+      "mode": "two-way",
+      "protocol": "Modbus TCP",
+      "destination_port": 502,
+      "application": "generic"
+    },
+    {
+      "id": "logs",
+      "sender_network_id": "inner",
+      "receiver_network_id": "outer",
+      "sender_ids": [
+        "device-0"
+      ],
+      "receiver_ids": [
+        "collector"
+      ],
+      "requirement_ids": [],
+      "purpose": null,
+      "policy": null,
+      "sources": [],
+      "kind": "data",
+      "mode": "one-way",
+      "protocol": "UDP",
+      "destination_port": 514,
+      "application": "generic"
+    },
+    {
+      "id": "time",
+      "sender_network_id": "outer",
+      "receiver_network_id": "inner",
+      "sender_ids": [
+        "clock"
+      ],
+      "receiver_ids": [
+        "device-0"
+      ],
+      "requirement_ids": [],
+      "purpose": null,
+      "policy": null,
+      "sources": [],
+      "kind": "data",
+      "mode": "one-way",
+      "protocol": "UDP",
+      "destination_port": 123,
+      "application": "ntp"
+    }
+  ],
+  "actors": [],
+  "manual_users": null,
+  "unknowns": [],
+  "assumptions": [],
+  "requests_for_vendor": [],
+  "legacy": null
+}

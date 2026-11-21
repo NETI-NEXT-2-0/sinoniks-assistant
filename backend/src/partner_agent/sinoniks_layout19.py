@@ -230,7 +230,8 @@ def _segment(
         points.reverse()
     page.edges.append(Edge(
         f"{rule.id}-{label}", source, target, points, COLORS[(rule.number - 1) % len(COLORS)],
-        rule.id, "none", "block" if incoming and terminal else "none",
+        rule.id, "open" if rule.two_way and terminal else "none",
+        "block" if terminal and (incoming or rule.two_way) else "none",
     ))
 
 
