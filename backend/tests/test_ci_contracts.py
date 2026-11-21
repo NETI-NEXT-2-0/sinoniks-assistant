@@ -116,19 +116,30 @@ def test_stack_resolves_repository_and_keeps_local_services_out_of_ci(tmp_path, 
     assert calls[-1] == ("config", "--quiet")
 
 
-def test_develop_pull_request_runs_full_checks_once_without_publishing():
+def test_heavy_checks_and_release_status_are_reserved_for_main_pull_requests():
     workflow = yaml.load(
         (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
-    assert set(workflow["on"]) == {"pull_request", "workflow_dispatch"}
+    assert set(workflow["on"]) == {"pull_request"}
     pull_request = workflow["on"]["pull_request"]
-    assert pull_request["branches"] == ["develop"]
+    assert set(pull_request["branches"]) == {"develop", "main"}
     assert set(pull_request["types"]) == {"opened", "synchronize", "reopened"}
     assert workflow["permissions"] == {"contents": "read"}
     jobs = workflow["jobs"]
     assert set(jobs) == {"quality", "postgres", "security", "containers", "required"}
     assert set(jobs["required"]["needs"]) == set(jobs) - {"required"}
+    condition = "${{ github.base_ref == 'main' }}"
+    assert jobs["containers"]["if"] == jobs["postgres"]["if"] == condition
+    assert jobs["required"]["name"] == (
+        "${{ github.base_ref == 'main' && 'release-required' || 'required' }}"
+    )
+    gate = jobs["required"]["steps"][0]
+    assert gate["env"]["RELEASE_PR"] == condition
+    assert 'test "$STACK" = success' in gate["run"]
+    assert 'test "$STACK" = skipped' in gate["run"]
+    assert 'test "$POSTGRES" = success' in gate["run"]
+    assert 'test "$POSTGRES" = skipped' in gate["run"]
     acceptance_steps = {step.get("name") for step in jobs["containers"]["steps"]}
     assert {
         "Browser acceptance", "Recovery acceptance", "Isolated conversion acceptance",
