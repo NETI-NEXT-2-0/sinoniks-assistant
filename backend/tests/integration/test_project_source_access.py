@@ -81,19 +81,28 @@ async def test_saved_project_reads_exports_writes_and_ancestors_follow_sources(
         revisions.append(upgraded.json())
     latest = revisions[-1]
     archives = {}
+    diagrams = {}
     for row in revisions:
         suffixes = (
             ["json", "txt", "requirements"]
             if row["input"]["schema_version"] == 3
-            else ["json", "txt", "drawio"]
+            else ["json", "txt"]
         )
+        artifacts = row["artifact_sha256"]
+        if row["status"] in ("conceptual", "completed"):
+            assert {"drawio", "diagram"} <= artifacts.keys()
+        if "drawio" in artifacts:
+            suffixes.append("drawio")
         for suffix in suffixes:
             url = base + f"/{row['id']}/download/{suffix}"
             response = await client.post(url, headers=headers)
             assert response.status_code == 200
             archives[url] = response.content
-        if row["input"]["schema_version"] != 3:
-            assert (await client.get(base + f"/{row['id']}/diagram")).status_code == 200
+        if "diagram" in artifacts:
+            url = base + f"/{row['id']}/diagram"
+            response = await client.get(url)
+            assert response.status_code == 200
+            diagrams[url] = response.json()
     # The ancestor's manifest still governs manually saved/upgraded descendants.
     if change == "grant":
         revoked = await curator.put(
@@ -200,6 +209,10 @@ async def test_saved_project_reads_exports_writes_and_ancestors_follow_sources(
     for url, original in archives.items():
         response = await client.post(url, headers=headers)
         assert response.status_code == 200 and response.content == original
+        assert response.headers["cache-control"] == "private, no-store"
+    for url, original in diagrams.items():
+        response = await client.get(url)
+        assert response.status_code == 200 and response.json() == original
         assert response.headers["cache-control"] == "private, no-store"
     async with session_factory()() as db:
         for identifier, artifacts in frozen.items():
