@@ -3,13 +3,16 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from test_chat_data_plane import new_chat, submit
 from test_chat_data_plane import plane as plane
 from test_demo_retrieval import cleanup
+from test_response_execution import configure_execution
 
 from partner_agent.documents.indexing import stage_version
 from partner_agent.documents.ingest import process_stored_text
@@ -17,12 +20,13 @@ from partner_agent.infra.db import session_factory
 from partner_agent.infra.models import User
 from partner_agent.knowledge19 import QUESTIONS, load_checks, load_sources
 from partner_agent.runtime.rag_provider import citation_location
+from partner_agent.runtime.runner import execute_run
 
 pytestmark = [pytest.mark.integration, pytest.mark.storage]
 KNOWLEDGE = "/api/v1/knowledge"
 
 
-async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
+async def test_supplied_knowledge19_upload_publish_grant_revoke(plane, monkeypatch):
     if os.environ.get("PARTNER_KNOWLEDGE19_TEST_CONFIRMED") != "1":
         pytest.skip("Explicit disposable supplied-corpus confirmation required")
     source_path = os.environ.get("PARTNER_KNOWLEDGE19_SOURCE")
@@ -146,6 +150,68 @@ async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
         holdout = await evaluate(holdout_checks)
         assert sum(row["expected_section_rank"] is not None for row in original) == 11
         assert all(row["expected_section_rank"] is not None for row in holdout)
+        grant_revisions = {identifier: 4 for identifier in documents.values()}
+        reference_results = []
+        if check_path := os.environ.get("PARTNER_KNOWLEDGE19_REFERENCE_CHECKS"):
+            checks = json.loads(Path(check_path).read_bytes())
+            assert isinstance(checks, list) and 1 <= len(checks) <= 12
+            configure_execution(monkeypatch)
+            for check in checks:
+                hits = await search(reader, reader_headers, check["query"])
+                selected = []
+                for pattern in check["facts"].values():
+                    matches = [(hit, re.search(pattern, hit["excerpt"], re.DOTALL)) for hit in hits]
+                    hit, match = next((hit, match) for hit, match in matches if match)
+                    selected.append((hit, match.group(0)))
+
+                async def model(settings, messages):
+                    assert all(hit["evidence_id"] in messages[-1]["content"] for hit, _ in selected)
+                    return {"choices": [{"message": {"content": json.dumps({
+                        "mode": "grounded", "answer": "Контроль передачи цитат из корпуса.",
+                        "citations": [{"evidence_id": hit["evidence_id"], "quote": quote}
+                                      for hit, quote in selected],
+                    })}}], "usage": {"prompt_tokens": 100, "completion_tokens": 100}}
+
+                monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+                chat = await new_chat(reader, reader_headers)
+                admitted = await submit(reader, reader_headers, chat, text=check["query"])
+                run_id = admitted.json()["run_id"]
+                finished = await execute_run(UUID(run_id), dispatch_generation=0)
+                assert finished["status"] == "succeeded"
+                for index, (hit, quote) in enumerate(selected):
+                    path = f"/api/v1/runs/{run_id}/citations/{index}"
+                    opened = await reader.get(path)
+                    assert opened.status_code == 200
+                    detail = opened.json()
+                    assert detail["quote"] == quote and detail["excerpt"] == hit["excerpt"]
+                    assert detail["location"] == citation_location(hit["locator"])
+                    assert detail["original_download_path"] is None
+                    assert (await outsider.get(path)).status_code == 404
+                reference_results.append({"id": check["id"], "citations": len(selected)})
+                if len(reference_results) == 1:
+                    hit, _ = selected[0]
+                    doc_id = UUID(hit["document_id"])
+                    grant_path = f"{KNOWLEDGE}/documents/{doc_id}/grants/{reader_id}"
+                    for allow_original in (True, False):
+                        changed = await owner.put(grant_path, headers=owner_headers, json={
+                            "expected_revision": grant_revisions[doc_id], "allow_answer": True,
+                            "allow_original": allow_original,
+                        })
+                        assert changed.status_code == 200
+                        grant_revisions[doc_id] = changed.json()["revision"]
+                        detail = (await reader.get(f"/api/v1/runs/{run_id}/citations/0")).json()
+                        download = f"{KNOWLEDGE}/versions/{hit['version_id']}/original/download"
+                        actual = await reader.post(download, headers=reader_headers)
+                        if allow_original:
+                            assert detail["original_download_path"] == download.removeprefix(
+                                "/api/v1",
+                            )
+                            source = next(s for s in sources if documents[s.name] == doc_id)
+                            assert actual.status_code == 200
+                            assert hashlib.sha256(actual.content).hexdigest() == source.digest
+                        else:
+                            assert detail["original_download_path"] is None
+                            assert actual.status_code == 404
         for version_id in versions.values():
             path = f"{KNOWLEDGE}/versions/{version_id}"
             assert (
@@ -156,7 +222,8 @@ async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
         response = await owner.put(
             f"{KNOWLEDGE}/documents/{documents[revoked]}/grants/{reader_id}",
             headers=owner_headers,
-            json={"expected_revision": 4, "allow_answer": False, "allow_original": False},
+            json={"expected_revision": grant_revisions[documents[revoked]],
+                  "allow_answer": False, "allow_original": False},
         )
         assert response.status_code == 200
         assert all(
@@ -183,6 +250,8 @@ async def test_supplied_knowledge19_upload_publish_grant_revoke(plane):
                 "answer_permission_does_not_allow_original": True,
                 "model_answers_verified": False,
                 "model_calls": 0,
+                "synthetic_reference_checks": reference_results,
+                "synthetic_provider_responses": len(reference_results),
             }
             with Path(report_path).open("x", encoding="utf-8") as handle:
                 json.dump(report, handle, ensure_ascii=False, indent=2)

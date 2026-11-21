@@ -5,6 +5,7 @@ Run explicitly in an isolated test environment. This is not a product fallback.
 
 import argparse
 import json
+import re
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -89,6 +90,15 @@ def incomplete_scenario(proposal: dict, question: str) -> None:
 
 
 def fixture_body(messages: list[dict] | None = None) -> dict:
+    if messages and "Синтетическая справка" in messages[-1]["content"].split("Evidence:", 1)[0]:
+        identifier = re.search(r"\[([0-9a-f-]{36})\]", messages[-1]["content"])
+        assert identifier is not None
+        result = {"mode": "grounded", "answer": "Контрольный факт: не более 256 правил.",
+                  "citations": [{"evidence_id": identifier[1],
+                                 "quote": "Контрольный факт: не более 256 правил."}]}
+        return {"id": "synthetic-reference-" + uuid.uuid4().hex,
+                "choices": [{"message": {"content": json.dumps(result, ensure_ascii=False)}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
     flow = {
         "sender_side": "A",
         "sender": "App1",

@@ -16,6 +16,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from partner_agent.accounting_routes import router as accounting_router
+from partner_agent.answer_source_routes import router as answer_sources_router
 from partner_agent.auth.admin import router as admin_router
 from partner_agent.auth.groups import router as groups_router
 from partner_agent.auth.routes import router
@@ -54,6 +55,7 @@ app.include_router(documents_router)
 app.include_router(design_router)
 app.include_router(web_router)
 app.include_router(accounting_router)
+app.include_router(answer_sources_router)
 app.include_router(vendor_wish_router)
 
 
