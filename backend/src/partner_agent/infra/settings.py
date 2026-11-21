@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     model_api_key: SecretStr = SecretStr("")
     model_timeout_seconds: float = Field(default=45.0, gt=0, allow_inf_nan=False)
     model_max_output_tokens: int = Field(default=3000, ge=128, le=12000)
+    model_context_window_tokens: int = Field(default=0, ge=0, le=10_000_000)
     model_wire_api: Literal["chat_completions", "responses"] = "chat_completions"
     model_input_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     model_output_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
@@ -125,6 +126,10 @@ class Settings(BaseSettings):
             ))
         ):
             raise ValueError("contest mode requires an eligible declared model tariff and route")
+        if self.model_contest_mode and (
+            self.model_request_cap_usd or self.model_daily_cap_usd
+        ) and self.model_context_window_tokens < self.model_max_output_tokens:
+            raise ValueError("contest spend caps require the declared route context window")
         if self.model_contest_mode and urlsplit(self.model_endpoint).hostname == "openrouter.ai":
             if self.model_endpoint.rstrip("/") != ROUTER_ENDPOINT:
                 raise ValueError("contest routing requires the direct HTTPS router endpoint")
