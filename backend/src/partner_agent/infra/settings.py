@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     idle_ttl_seconds: int = 43200
     absolute_ttl_seconds: int = 604800
     login_failures_per_minute: int = 5
+    self_registration_enabled: bool = False
+    registration_attempts_per_minute: int = Field(default=5, gt=0)
     api_requests_per_minute: int = 120
     runtime_profile: Literal["offline_fixture", "openai_compatible"] = "offline_fixture"
     design_input_version: Literal[2, 3] = 3

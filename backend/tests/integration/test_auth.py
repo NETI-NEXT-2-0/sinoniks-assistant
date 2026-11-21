@@ -1,5 +1,6 @@
 """Runs against a migrated, disposable PostgreSQL database; never creates an SQLite substitute."""
 
+import asyncio
 import os
 from datetime import timedelta
 
@@ -11,7 +12,7 @@ from sqlalchemy import delete, select, update
 from partner_agent.auth.security import digest
 from partner_agent.cli import first_admin, reset_password
 from partner_agent.infra.db import get_engine, session_factory
-from partner_agent.infra.models import AuditEvent, RateLimit, Session, User, utcnow
+from partner_agent.infra.models import AuditEvent, Membership, RateLimit, Session, User, utcnow
 from partner_agent.infra.settings import get_settings
 from partner_agent.main import app
 
@@ -134,6 +135,103 @@ async def login(client, headers):
         headers=headers,
         json={"login": "ADMIN", "password": "safe-test-password-123"},
     )
+
+
+REGISTRATION = {"login": "Engineer", "password": "synthetic-registration-password"}
+
+
+async def register(client, headers, **overrides):
+    return await client.post(
+        "/api/v1/auth/register", headers=headers, json={**REGISTRATION, **overrides}
+    )
+
+
+async def test_registration_requires_operator_opt_in(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "self_registration_enabled", False)
+    csrf = await client.get("/api/v1/auth/csrf")
+    assert csrf.json()["self_registration_enabled"] is False
+    headers = {"Origin": "http://localhost:8080", "X-CSRF-Token": csrf.json()["csrf_token"]}
+    response = await register(client, headers)
+    assert response.status_code == 403
+    assert response.json()["code"] == "registration_disabled"
+    assert (await login(client, headers)).status_code == 200
+
+
+async def test_registration_creates_isolated_user_and_rotates_session(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "self_registration_enabled", True)
+    csrf = await client.get("/api/v1/auth/csrf")
+    assert csrf.json()["self_registration_enabled"] is True
+    headers = {"Origin": "http://localhost:8080", "X-CSRF-Token": csrf.json()["csrf_token"]}
+    anonymous_cookie = client.cookies.get("partner-dev-session")
+    response = await register(client, headers, login=" Ｅngineer ")
+    assert response.status_code == 201
+    user = response.json()["user"]
+    assert (user["login"], user["role"]) == ("engineer", "user")
+    assert response.headers["cache-control"] == "no-store"
+    assert "httponly" in response.headers["set-cookie"].lower()
+    assert REGISTRATION["password"] not in response.text
+    assert client.cookies.get("partner-dev-session") != anonymous_cookie
+    assert (await client.get("/api/v1/auth/me")).json() == user
+    assert (await client.get("/api/v1/admin/users")).status_code == 403
+    assert (await client.get("/api/v1/chats")).json()["items"] == []
+    authenticated_headers = {**headers, "X-CSRF-Token": response.json()["csrf_token"]}
+    assert (await register(client, authenticated_headers, login="another")).status_code == 409
+    async with session_factory()() as db:
+        old_session = await db.scalar(
+            select(Session).where(Session.token_hash == digest(anonymous_cookie))
+        )
+        assert old_session.revoked_at is not None
+        account = await db.scalar(select(User).where(User.normalized_login == "engineer"))
+        assert account.password_hash.startswith("$argon2id$")
+        assert await db.scalar(select(Membership).where(Membership.user_id == account.id)) is None
+        event = await db.scalar(select(AuditEvent).where(AuditEvent.action == "auth.register"))
+        assert event.actor_id == account.id and event.result == "success"
+    assert (await client.post("/api/v1/auth/logout", headers=headers)).status_code == 403
+    logout = await client.post("/api/v1/auth/logout", headers=authenticated_headers)
+    assert logout.status_code == 204
+    signed_in = await client.post(
+        "/api/v1/auth/login", headers=await prepare(client), json=REGISTRATION
+    )
+    assert signed_in.status_code == 200
+    assert signed_in.json()["user"] == user
+
+
+async def test_registration_validation_and_throttle(client, monkeypatch):
+    from partner_agent.auth import routes
+
+    now = utcnow()
+    monkeypatch.setattr(routes, "utcnow", lambda: now)
+    monkeypatch.setattr(get_settings(), "self_registration_enabled", True)
+    monkeypatch.setattr(get_settings(), "registration_attempts_per_minute", 5)
+    headers = await prepare(client)
+    wrong_origin = await register(client, {**headers, "Origin": "https://other.example"})
+    assert wrong_origin.status_code == 403 and wrong_origin.json()["code"] == "origin_rejected"
+    assert (await register(client, {**headers, "X-CSRF-Token": "wrong"})).status_code == 403
+    assert (await register(client, headers, password="short")).status_code == 422
+    assert (await register(client, headers, role="admin")).status_code == 422
+    assert (await register(client, headers, login="with space")).status_code == 422
+    blocked = await register(client, await prepare(client))
+    assert blocked.status_code == 429 and blocked.json()["code"] == "registration_rate_limited"
+    now += timedelta(minutes=1)
+    assert (await register(client, await prepare(client))).status_code == 201
+
+
+async def test_concurrent_registration_preserves_unique_normalized_login(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "self_registration_enabled", True)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost:8080"
+    ) as second:
+        first_headers = await prepare(client)
+        second_headers = await prepare(second)
+        results = await asyncio.gather(
+            register(client, first_headers),
+            register(second, second_headers, login=" ENGINEER "),
+        )
+        assert sorted(response.status_code for response in results) == [201, 409]
+        conflict = next(response for response in results if response.status_code == 409)
+        assert conflict.json()["code"] == "login_exists"
+        loser = (client, second)[results.index(conflict)]
+        assert (await loser.get("/api/v1/auth/me")).status_code == 401
 
 
 async def test_login_rotates_and_logout_revokes(client):

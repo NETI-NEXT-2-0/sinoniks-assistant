@@ -43,6 +43,11 @@ function isError(value: unknown): value is ErrorEnvelope {
 export class AuthClient {
   private csrfToken: string | null = null;
   private csrfPending: Promise<void> | null = null;
+  private registrationEnabled = false;
+
+  get selfRegistrationEnabled(): boolean {
+    return this.registrationEnabled;
+  }
 
   reset(): void {
     this.csrfToken = null;
@@ -163,6 +168,7 @@ export class AuthClient {
       const result = await this.request('/auth/csrf');
       if (!isRecord(result) || typeof result.csrf_token !== 'string') throw new ApiError(502, 'invalid_response');
       this.csrfToken = result.csrf_token;
+      this.registrationEnabled = result.self_registration_enabled === true;
     })();
     this.csrfPending = pending;
     try { await pending; }
@@ -178,8 +184,16 @@ export class AuthClient {
   async login(login: string, password: string): Promise<User> {
     // Refresh the synchronizer token before each login attempt. A parallel tab
     // may have changed the shared pre-login cookie since this form was opened.
+    return this.authenticate('/auth/login', login, password);
+  }
+
+  async register(login: string, password: string): Promise<User> {
+    return this.authenticate('/auth/register', login, password);
+  }
+
+  private async authenticate(path: '/auth/login' | '/auth/register', login: string, password: string): Promise<User> {
     await this.csrf();
-    const result = await this.request('/auth/login', {
+    const result = await this.request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrfToken ?? '' },
       body: JSON.stringify({ login, password }),
@@ -205,8 +219,16 @@ export class AuthClient {
   }
 }
 
-export function errorMessage(error: unknown, action: 'login' | 'logout' | 'session'): string {
+export function errorMessage(error: unknown, action: 'login' | 'register' | 'logout' | 'session'): string {
   if (!(error instanceof ApiError)) return 'Не удалось выполнить действие. Повторите попытку.';
+  if (action === 'register') {
+    if (error.code === 'login_exists') return 'Этот логин уже занят. Выберите другой или войдите в свой аккаунт.';
+    if (error.code === 'registration_disabled') return 'Самостоятельная регистрация отключена. Обратитесь к администратору.';
+    if (error.code === 'already_signed_in') return 'Вы уже вошли в другой вкладке. Обновите страницу.';
+    if (error.code === 'registration_rate_limited') return 'Слишком много попыток регистрации. Попробуйте через минуту.';
+    if (error.code === 'invalid_login') return 'Введите логин без пробелов.';
+    if (error.status === 401) return 'Срок действия формы истёк. Повторите попытку.';
+  }
   if (error.status === 401) {
     return action === 'login' ? 'Неверный логин или пароль.' : 'Сессия истекла. Войдите снова.';
   }
@@ -218,6 +240,7 @@ export function errorMessage(error: unknown, action: 'login' | 'logout' | 'sessi
   if (error.code === 'request_timeout') return 'Сервис не ответил вовремя. Повторите попытку.';
   if (error.status === 0) return 'Нет связи с сервисом. Проверьте подключение и повторите попытку.';
   if (error.status === 422) return 'Проверьте логин и пароль и попробуйте снова.';
+  if (action === 'register') return 'Не удалось создать аккаунт. Повторите попытку.';
   return action === 'logout' ? 'Не удалось выйти. Повторите попытку.'
     : 'Не удалось загрузить данные. Повторите попытку.';
 }
