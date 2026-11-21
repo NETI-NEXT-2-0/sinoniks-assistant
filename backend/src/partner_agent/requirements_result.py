@@ -151,3 +151,39 @@ def result_artifacts19(
     if diagram_unavailability19(calculation) is None:
         artifacts.update(diagram_artifacts(layout19(request, calculation)))
     return {**result, "explanation": text}, artifacts
+
+
+def expert_accounting(ledger: dict[str, Any]) -> dict[str, Any]:
+    turns = ledger["turns"]
+    if not turns:
+        return {}
+    summary = ledger["summary"]
+    active = any(turn["status"] in {"queued", "running"} for turn in turns)
+    complete = ledger["accounting_complete"] and not active
+    calls = [
+        {**{key: value for key, value in call.items() if key not in {"usage", "raw_usage_format"}},
+         "usage": {key: value for key, value in call["usage"].items()
+                   if key not in {"raw", "reconciliation"}}}
+        for call in ledger["calls"]
+    ]
+    meaningful_totals = (
+        not active and not ledger["legacy_untracked_turns"] and not summary["unfinished_calls"]
+    )
+    full_mean = ledger["mean_full_elapsed_ms"]
+    return {
+        "usage": {
+            "status": "measured" if complete else "partial",
+            "input_tokens": summary["input_tokens"] if meaningful_totals else None,
+            "output_tokens": summary["output_tokens"] if meaningful_totals else None,
+            "input_cost_usd": summary["input_cost_usd"] if meaningful_totals else None,
+            "output_cost_usd": summary["output_cost_usd"] if meaningful_totals else None,
+            "evaluation_cost_usd": summary["estimated_cost_usd"] if meaningful_totals else None,
+            "actual_cost_usd": summary["provider_cost_usd"] if meaningful_totals else None,
+            "known_recorded_cost_usd": summary["known_recorded_cost_usd"],
+            "calls": calls,
+        },
+        "timing": {
+            "turns": turns,
+            "mean_turn_seconds": full_mean / 1000 if full_mean is not None else None,
+        },
+    }

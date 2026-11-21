@@ -66,8 +66,9 @@ export function DesignResultCard({
     setBusy(true);
     setError("");
     try {
+      const query = extension === "json" && requirements ? "?include_accounting=true" : "";
       const file = await auth.download(
-        `/chats/${chatId}/designs/${id}/download/${extension}`,
+        `/chats/${chatId}/designs/${id}/download/${extension}${query}`,
       );
       const url = URL.createObjectURL(file.blob);
       const link = document.createElement("a");
