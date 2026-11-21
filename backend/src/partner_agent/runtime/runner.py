@@ -155,6 +155,12 @@ async def execute_run(
                 answer = result["answer"]
                 if answer_mode == "project_explanation" and project is not None:
                     answer = f"По сохранённой ревизии №{project.revision}.\n\n{answer}"
+                elif (current_run.request_mode == "design" and answer_mode == "insufficient"
+                      and project is not None):
+                    answer = (
+                        "Изменения по этому запросу не сохранены. "
+                        f"Запрос выполнен для версии №{project.revision}.\n\n{answer}"
+                    )
                 status = await complete(
                     claim.ownership, "succeeded",
                     {"profile": settings.runtime_profile, "citations": result["citations"],
