@@ -46,7 +46,9 @@ def main() -> None:
         with archive.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         manifest["archive_sha256"] = digest
-    (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (args.output / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8",
+    )
     print("Candidate built locally; no registry push, deployment or release was performed")
 
 

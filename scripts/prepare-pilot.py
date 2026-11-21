@@ -49,7 +49,8 @@ def check_env(values: dict[str, str]) -> list[str]:
         if not values.get(key, "").strip():
             failures.append(key + " is missing")
     endpoint = urlsplit(values.get("PARTNER_MODEL_ENDPOINT", ""))
-    if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.password:
+    if (endpoint.scheme != "https" or not endpoint.hostname
+            or endpoint.username or endpoint.password):
         failures.append("PARTNER_MODEL_ENDPOINT must use HTTPS without embedded credentials")
     for key in ("PARTNER_MODEL_REQUEST_CAP_USD", "PARTNER_MODEL_DAILY_CAP_USD"):
         try:
