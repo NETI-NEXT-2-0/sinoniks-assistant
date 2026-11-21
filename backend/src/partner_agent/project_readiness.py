@@ -35,6 +35,15 @@ def _file_check_directions(rule: dict[str, Any]) -> list[dict[str, Any]]:
     return [{key: direction[key] for key in fields} for direction in rule["directions"]]
 
 
+def _file_access_directions(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"from_network_id": lane["from_network_id"], "to_network_id": lane["to_network_id"],
+         "access_group": lane["access_groups"][lane["to_network_id"]],
+         "received_files_shared": lane["received_files_shared"]}
+        for lane in rule["directions"]
+    ]
+
+
 def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> list[dict[str, Any]]:
     """Check semantic identities, not presentation coordinates or key ordering."""
     try:
@@ -64,6 +73,11 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                 if (scene["preview_file_checks"] != preview_checks
                         or json.loads(root.attrib["data-preview-file-checks"]) != preview_checks):
                     raise ValueError("preview file checks mismatch")
+                preview_access = {rule["rule_id"]: _file_access_directions(rule)
+                                  for rule in expected if rule["type"] == "file"}
+                if (scene.get("preview_file_access") != preview_access
+                        or json.loads(root.attrib["data-preview-file-access"]) != preview_access):
+                    raise ValueError("preview file access mismatch")
             diagram_rules = [] if placement_pending else expected
             if (root.tag != "mxfile" or rows != json.loads(root.attrib["data-rule-rows"])
                     or len(rows) != len(diagram_rules)):
@@ -109,6 +123,8 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                 if rule["type"] == "file":
                     if row.get("file_check_directions") != _file_check_directions(rule):
                         raise ValueError("file checks mismatch")
+                    if row.get("file_access_directions") != _file_access_directions(rule):
+                        raise ValueError("file access mismatch")
         return []
     except (ValueError, TypeError, KeyError, ParseError):
         return [{"code": "artifact_mismatch", "path": None, "subject": "Выгрузки",

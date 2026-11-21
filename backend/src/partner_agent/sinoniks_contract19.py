@@ -4,6 +4,7 @@ Version 3 describes user requirements, not the organizer's result JSON 1.1.
 No trust, protocol, port, file method or rule minimum is inferred here.
 """
 
+import re
 from collections.abc import Container
 from typing import Annotated, Any, Literal, cast
 
@@ -66,6 +67,26 @@ class System19(StrictModel):
 class Actor19(StrictModel):
     id: Identifier
     name: Name19 | None = None
+    # Explicit identity takes precedence over the name. None denotes a legacy record.
+    classification: Literal["person", "group"] | None = None
+
+    @model_serializer(mode="wrap")
+    def compatible_dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        document = cast(dict[str, Any], handler(self))
+        if self.classification is None:
+            document.pop("classification", None)
+        return document
+
+    def is_collective(self) -> bool:
+        if self.classification is not None:
+            return self.classification == "group"
+        # Compatibility for stored v3 projects written before classification existed.
+        return bool(re.match(
+            r"^(?:отдел|подразделение|группа|команда|департамент|"
+            r"department|division|group|team)\b",
+            (self.name or "").strip(),
+            re.IGNORECASE,
+        ))
 
 
 class CountRange19(StrictModel):
@@ -235,7 +256,7 @@ class Requirements19(StrictModel):
             raise ValueError("Stable identifiers must be globally unique")
         networks = {item.id for item in self.networks}
         systems = {item.id: item for item in self.systems}
-        actors = {item.id for item in self.actors}
+        actors = {item.id: item for item in self.actors}
 
         def reference(value: str | None, known: Container[str]) -> None:
             if value is not None and value not in known:
@@ -278,9 +299,10 @@ class Requirements19(StrictModel):
                         raise ValueError("Manual actors require a manual or USB transfer")
                     if side.manual is False and side.manual_protocol is not None:
                         raise ValueError("Manual protocol conflicts with disabled manual transfer")
-                    manual_actors.update(side.actor_ids)
                     for actor in side.actor_ids:
                         reference(actor, actors)
+                        if not actors[actor].is_collective():
+                            manual_actors.add(actor)
                     for automation in side.automations:
                         reference(automation.storage_id, systems)
                         if automation.storage_id is not None:

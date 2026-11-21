@@ -1,7 +1,7 @@
 """Controlled conversational outcomes; never expose rejected model output."""
 
 
-def recovery_message(code: str) -> str | None:
+def recovery_message(code: str, *, has_project: bool = True) -> str | None:
     if code == "provider_project_answer_unresolved":
         return (
             "Ответы сохранены в сообщении, но по ним пока не удалось изменить условия проекта. "
@@ -34,6 +34,11 @@ def recovery_message(code: str) -> str | None:
         "provider_request_mode_violation",
         "request_mode_violation",
     }:
+        if not has_project:
+            return (
+                "Не удалось собрать первый проект из полученного описания. "
+                "Условия остались в чате. Можно повторить запрос или уточнить спорный обмен."
+            )
         return (
             "Не удалось однозначно подготовить изменение схемы. Уточните, пожалуйста, "
             "какую сеть, устройство или передачу данных нужно добавить или изменить. "

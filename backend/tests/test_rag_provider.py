@@ -43,6 +43,36 @@ def test_reference_prompt_includes_only_readonly_project_context():
     assert "Read-only saved project conditions:" in messages[-1]["content"]
 
 
+def test_new_file_design_prompt_separates_usb_boundary_roles_and_people():
+    request = prepare_request(
+        "Подрядчик приносит флешку с обновлениями.", [],
+        design_context={"schema_version": 3, "id": "draft"}, new_project=True,
+    )
+    instruction = request.messages[0]["content"]
+    assert "sender_ids contains the USB system" in instruction
+    assert "Never create a USB network" in instruction
+    assert "kind=icap and icap_service=antivirus" in instruction
+    assert "MQTT uses two-way transport" in instruction
+    assert "Set classification='person' for an actual human" in instruction
+    assert "Set classification='group' for any department" in instruction
+
+
+def test_incomplete_file_exchange_guidance_is_available_without_a_saved_project():
+    request = prepare_request(
+        "Не знаю. Какой минимум возможен?", [],
+        history=[
+            {"role": "user", "content": "Нужно пересылать файлы в обе стороны."},
+            {"role": "assistant", "content": "Какие методы и проверки нужны?"},
+        ],
+    )
+    instruction = request.messages[0]["content"]
+    assert "one rule is possible only" in instruction
+    assert "The final number remains unknown." in instruction
+    assert "When exactly two stores each send to the other" in instruction
+    assert "Preserve an explicitly described closed or open network" in instruction
+    assert request.can_explain_project is False
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requested,returned,proposal,allowed", [
     ("reference", "design", {}, False),

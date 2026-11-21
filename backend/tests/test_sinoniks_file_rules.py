@@ -67,6 +67,51 @@ def test_two_pulls_and_pushes_on_both_nodes_become_two_rules_and_two_users():
     ]
 
 
+def test_unknown_checks_do_not_remove_proven_two_pull_lower_bound():
+    request = plan([files(
+        "sync",
+        side("office", checks=None, automations=[
+            automation(op, "office") for op in ("PULL", "PUSH")
+        ]),
+        side("plant", checks=None, automations=[
+            automation(op, "plant") for op in ("PULL", "PUSH")
+        ]),
+        direction="both",
+    )])
+    result = calculate_file_rules(request, outside_network_id="office")
+    assert len(result.rules) == result.lower_bound == result.declared_pulls == 2
+    assert result.minimum is None and result.file_users_count is None
+    assert result.user_details.manual_upper == 0
+
+
+def test_isolated_departments_require_two_rules_without_counting_each_as_person():
+    request = plan([
+        files(f"flow-{department}",
+              side("office", manual=True, manual_protocol="SFTP", actor_ids=[department],
+                   checks=None),
+              side("plant", checks=None, received_files_shared=False, access_group=department))
+        for department in ("engineering", "quality")
+    ], actors=[{"id": "engineering", "name": "Отдел 1"}, {"id": "quality", "name": "Группа 2"}])
+    result = calculate_file_rules(request, outside_network_id="office")
+    assert len(result.rules) == result.lower_bound == 2
+    assert result.minimum is None
+    assert result.file_users_count is None and result.file_users_range is None
+    assert result.user_details.actor_ids == () and result.user_details.manual_upper is None
+    expert, artifacts = result_artifacts19(request, session_id="isolated-groups")
+    assert "Ручные пользователи: неизвестно." in artifacts["txt"]
+    assert [rule["directions"][0]["received_files_shared"] for rule in expert["rules"]] == [
+        False, False,
+    ]
+    groups = {rule["directions"][0]["access_groups"]["plant"] for rule in expert["rules"]}
+    assert groups == {"engineering", "quality"}
+    assert all(f"Раздельный доступ (Цех): {group}" in artifacts["txt"] for group in groups)
+    native = ElementTree.fromstring(artifacts["drawio"])
+    access = [row["file_access_directions"][0]
+              for row in json.loads(native.attrib["data-rule-rows"])]
+    assert {lane["access_group"] for lane in access} == groups
+    assert all(lane["received_files_shared"] is False for lane in access)
+
+
 def test_f04_manual_sftp_and_smb_push_need_one_known_user():
     request = plan([files(
         "programs",
@@ -93,6 +138,24 @@ def test_f04_manual_sftp_and_smb_push_need_one_known_user():
         "name_mask", "size", "icap",
     }
     assert rule["checks_by_node"]["B"] == []
+
+
+def test_f04_known_check_parameters_do_not_invent_extra_scope():
+    request = plan([files(
+        "programs", side("office", checks=None, manual=True, manual_protocol="SFTP",
+                         actor_ids=["operator"]),
+        side("plant", automations=[automation("PUSH", "plant", "SMB")], checks=[
+            {"kind": "name_mask", "details": "*.nc"},
+            {"kind": "size", "details": "10 МБ"},
+            {"kind": "icap", "icap_service": "antivirus"},
+        ]),
+        sender_ids=["office-store"], receiver_ids=["plant-store"],
+    )])
+    assert not assess(request).issues
+    result = calculate_file_rules(request, outside_network_id="office")
+    assert len(result.rules) == result.lower_bound == 1
+    assert result.minimum is None
+    assert [issue.reason for issue in result.issues] == ["file_check_scope_unconfirmed"]
 
 
 def test_covers_mixed_usb_and_icap_with_push_and_one_human():
