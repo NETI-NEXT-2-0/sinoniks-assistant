@@ -72,6 +72,10 @@ def render(revision: str) -> dict:
         if "build" in service:
             service.pop("build")
             service["image"] = f"sinoniks-api:{revision}"
+        if name in {"api", "agent-worker", "relay", "reconciler"}:
+            service["environment"]["PARTNER_MODEL_TIMEOUT_SECONDS"] = (
+                "${PARTNER_MODEL_TIMEOUT_SECONDS:-90}"
+            )
         # Keep operator consoles loopback-only and all stores on private networks.
         if name != "caddy" and name != "hatchet-dashboard":
             service.pop("ports", None)
