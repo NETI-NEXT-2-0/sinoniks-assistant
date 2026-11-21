@@ -106,6 +106,64 @@ def reply(conditions):
     }
 
 
+@pytest.mark.parametrize("response_kind", ["insufficient", "truncated"])
+async def test_unapplied_chat_edit_keeps_the_saved_revision(plane, monkeypatch, response_kind):
+    client, headers, _ = await plane()
+    configure_execution(monkeypatch)
+    chat = await new_chat(client, headers)
+    branch = chat["default_branch_id"]
+    chat_url = f"/api/v1/chats/{chat['id']}"
+    design_url = chat_url + "/designs"
+    saved = await client.post(
+        design_url, headers={**headers, "Idempotency-Key": str(uuid4())},
+        json={"branch_id": branch, "input": design_input()},
+    )
+    assert saved.status_code == 201
+    first = saved.json()
+    initial_file = await client.post(
+        design_url + f"/{first['id']}/download/json", headers=headers,
+    )
+
+    async def model(settings, messages):
+        serialized = messages[-1]["content"].split("Saved project conditions:\n")[1]
+        assert json.loads(serialized)["exchanges"][0]["policy"] == "Только мониторинг"
+        response = reply(None)
+        message = {"answer": "Нужно уточнить режим.", "mode": "insufficient",
+                   "citations": [], "design": None}
+        response["choices"][0].update(
+            message={"content": json.dumps(message)},
+            finish_reason="length" if response_kind == "truncated" else "stop",
+        )
+        if response_kind == "truncated":
+            response["usage"]["completion_tokens"] = 7000
+            response["usage"]["total_tokens"] = 7200
+        return response
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    admitted = await client.post(
+        chat_url + "/runs", headers={**headers, "Idempotency-Key": str(uuid4())},
+        json={"branch_id": branch, "request_mode": "design", "message": "Измени правило."},
+    )
+    assert admitted.status_code == 202
+    run_id = admitted.json()["run_id"]
+    result = await execute_run(UUID(run_id), dispatch_generation=0)
+    run = (await client.get(f"/api/v1/runs/{run_id}")).json()
+    if response_kind == "insufficient":
+        assert result["status"] == "succeeded"
+        assert run["outcome"]["answer_mode"] == "insufficient"
+        snapshot = (await client.get(chat_url + "/snapshot")).json()
+        assistant, = [item for item in snapshot["messages"] if item["role"] == "assistant"]
+        assert assistant["content"].startswith("Изменения по этому запросу не сохранены.")
+    else:
+        assert result["status"] == "failed"
+        assert run["outcome"]["code"] == "provider_incomplete_response"
+    assert "design_id" not in run["outcome"]
+    latest = (await client.get(design_url + "/latest", params={"branch_id": branch})).json()
+    assert latest["design"]["id"] == first["id"]
+    archived = await client.post(design_url + f"/{first['id']}/download/json", headers=headers)
+    assert archived.content == initial_file.content
+
+
 async def test_chat_design_clarification_revision_sources_and_download(plane, monkeypatch):
     client, headers, _ = await plane()
     configure_execution(monkeypatch)
