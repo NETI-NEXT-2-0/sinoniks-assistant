@@ -3,7 +3,7 @@ from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,13 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 class LoginBody(BaseModel):
     login: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
+
+
+class RegistrationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login: str = Field(min_length=1, max_length=128)
+    password: SecretStr = Field(min_length=12, max_length=1024)
 
 
 def cookie(response: Response, value: str) -> None:
@@ -110,7 +117,7 @@ async def authenticated(request: Request, db: AsyncSession) -> tuple[Session, Us
 
 
 @router.get("/csrf", dependencies=[Depends(api_rate_limit)])
-async def csrf(request: Request, response: Response, db: DB) -> dict[str, str]:
+async def csrf(request: Request, response: Response, db: DB) -> dict[str, str | bool]:
     # An existing authenticated cookie may obtain a new synchronizer token after a reload.
     token = request.cookies.get(get_settings().cookie_name, "")
     existing = None
@@ -137,7 +144,10 @@ async def csrf(request: Request, response: Response, db: DB) -> dict[str, str]:
     await db.commit()
     cookie(response, token)
     response.headers["Cache-Control"] = "no-store"
-    return {"csrf_token": csrf_token}
+    return {
+        "csrf_token": csrf_token,
+        "self_registration_enabled": get_settings().self_registration_enabled,
+    }
 
 
 @router.post("/login", dependencies=[Depends(api_rate_limit)])
@@ -181,9 +191,52 @@ async def login(body: LoginBody, request: Request, response: Response, db: DB) -
         raise APIError(401, "invalid_credentials", "Invalid login or password")
     if upgraded:
         user.password_hash = upgraded
-    session.revoked_at = utcnow()
+    return await start_session(db, response, session, user, "auth.login")
+
+
+async def registration_rate_limit(request: Request, db: DB) -> None:
+    settings = get_settings()
+    if not settings.self_registration_enabled:
+        raise APIError(403, "registration_disabled", "Self-registration is disabled")
+    ip = request.client.host if request.client else "unknown"
+    count = await increment(db, "register:" + digest(ip))
+    await db.commit()
+    if count > settings.registration_attempts_per_minute:
+        raise APIError(429, "registration_rate_limited", "Too many registration attempts", True)
+
+
+@router.post(
+    "/register", status_code=201,
+    dependencies=[Depends(api_rate_limit), Depends(registration_rate_limit)],
+)
+async def register(
+    body: RegistrationBody, request: Request, response: Response, db: DB
+) -> dict[str, object]:
+    session = await unsafe_session(request, db)
+    if session.user_id is not None:
+        raise APIError(409, "already_signed_in", "Sign out before creating an account")
+    try:
+        normalized = normalize_login(body.login)
+    except ValueError:
+        raise APIError(422, "invalid_login", "Invalid login") from None
+    hashed = await run_in_threadpool(password_hasher.hash, body.password.get_secret_value())
+    user = await db.scalar(
+        insert(User)
+        .values(normalized_login=normalized, password_hash=hashed, role="user")
+        .on_conflict_do_nothing(index_elements=[User.normalized_login])
+        .returning(User)
+    )
+    if user is None:
+        raise APIError(409, "login_exists", "Login already exists")
+    return await start_session(db, response, session, user, "auth.register")
+
+
+async def start_session(
+    db: AsyncSession, response: Response, session: Session, user: User, action: str
+) -> dict[str, object]:
     token, csrf_token = new_secret(), new_secret()
     now = utcnow()
+    session.revoked_at = now
     db.add(
         Session(
             token_hash=digest(token),
@@ -193,7 +246,7 @@ async def login(body: LoginBody, request: Request, response: Response, db: DB) -
             absolute_expires_at=now + timedelta(seconds=get_settings().absolute_ttl_seconds),
         )
     )
-    db.add(AuditEvent(actor_id=user.id, action="auth.login", result="success"))
+    db.add(AuditEvent(actor_id=user.id, action=action, result="success"))
     await db.commit()
     cookie(response, token)
     response.headers["Cache-Control"] = "no-store"
