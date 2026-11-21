@@ -78,10 +78,10 @@ with sync_playwright() as session:
     with page.expect_response(
         lambda response: response.request.method == "POST" and response.url.endswith("/runs")
     ) as direct:
-        choices.get_by_role("button", name="Сохранить ответ", exact=True).click()
+        choices.get_by_role("button", name="Применить ответы (1)", exact=True).click()
     assert direct.value.status == 202
     command = direct.value.request.post_data_json["project_answer"]
-    assert command["base_revision_id"] == first["id"] and command["value"] == "UDP"
+    assert command["base_revision_id"] == first["id"] and command["answers"][0]["value"] == "UDP"
     second_card = page.get_by_role("region", name="Проект Синоникса · версия 2", exact=True)
     expect(second_card).to_be_visible(timeout=60000)
     expect(page.get_by_text("Готово", exact=True)).to_have_count(2, timeout=60000)
@@ -99,6 +99,7 @@ with sync_playwright() as session:
     unknown = third_card.get_by_role("button", name="Не знаю", exact=True)
     expect(unknown).to_be_visible(timeout=60000)
     unknown.click()
+    third_card.get_by_role("button", name="Применить ответы (1)", exact=True).click()
     fourth = page.get_by_role("region", name="Проект Синоникса · версия 4", exact=True)
     expect(fourth).to_be_visible(timeout=60000)
     expect(page.get_by_text("Готово", exact=True)).to_have_count(4, timeout=60000)

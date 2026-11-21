@@ -1,7 +1,7 @@
 import { projectSourceError } from "./projectErrors";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, isRecord, type AuthClient } from "../api/client";
-import type { ProjectAnswerInput, SubmittedWishInput } from "../api/chats";
+import type { ProjectAnswerInput, ProjectFieldAnswerInput, SubmittedWishInput } from "../api/chats";
 import "./project-questions.css";
 
 interface Question {
@@ -44,6 +44,47 @@ function parse(value: unknown, id: string): Page {
     throw new ApiError(502, "invalid_response");
   return value as unknown as Page;
 }
+
+function fieldAnswer(
+  question: Question,
+  input: string,
+  upperInput: string,
+  selected: string[],
+  unknown: boolean,
+): ProjectFieldAnswerInput | null {
+  const field = {
+    path: question.field,
+    target_id: question.target_id,
+    side_network_id: question.side_network_id,
+  };
+  if (unknown) return { ...field, unknown: true };
+  switch (question.kind) {
+    case "choice": {
+      const choice = input ? question.choices[Number(input)] : undefined;
+      return choice ? { ...field, value: choice.value } : null;
+    }
+    case "multiple":
+      return selected.length ? { ...field, value: selected } : null;
+    case "number": {
+      const value = Number(input);
+      return Number.isInteger(value) && value >= 1 && value <= 65535
+        ? { ...field, value }
+        : null;
+    }
+    case "range": {
+      const lower = Number(input);
+      const upper = upperInput ? Number(upperInput) : null;
+      return input && Number.isInteger(lower) && lower >= 0 &&
+        (upper === null || (Number.isInteger(upper) && upper >= lower))
+        ? { ...field, value: { lower, upper } }
+        : null;
+    }
+    case "text":
+      return input.trim() ? { ...field, value: input.trim() } : null;
+    default:
+      return null;
+  }
+}
 export function ProjectClarifications({
   auth,
   chatId,
@@ -73,7 +114,10 @@ export function ProjectClarifications({
     [offset, setOffset] = useState(0);
   const [values, setValues] = useState<Record<string, string>>({}),
     [selected, setSelected] = useState<Record<string, string[]>>({}),
-    [other, setOther] = useState<string | null>(null),
+    [visited, setVisited] = useState<Record<string, Question>>({}),
+    [unknowns, setUnknowns] = useState<Record<string, boolean>>({}),
+    [other, setOther] = useState<Record<string, boolean>>({}),
+    [freeText, setFreeText] = useState<Record<string, string>>({}),
     [sending, setSending] = useState(false);
   const ready = useRef(onReady);
   ready.current = onReady;
@@ -99,7 +143,12 @@ export function ProjectClarifications({
       )
       .then((value) => {
         const parsed = parse(value, revisionId);
-        if (live) setPage(parsed);
+        if (live) {
+          setPage(parsed);
+          setVisited((old) => ({ ...old, ...Object.fromEntries(
+            parsed.questions.map((question) => [question.field, question]),
+          ) }));
+        }
       })
       .catch((failure) => {
         if (!live) return;
@@ -122,71 +171,45 @@ export function ProjectClarifications({
       cancelAnimationFrame(second);
     };
   }, [page]);
-  async function answer(question: Question, unknown = false): Promise<void> {
-    if (!page?.current || disabled || sending) return;
-    let value: unknown = null,
-      label = "Не знаю";
-    if (!unknown) {
-      if (other === question.field) {
-        setSending(true);
-        try {
-          if (
-            !(await onAnswer(
-              `${question.text} Другое: ${values[question.field] ?? ""}`,
-              undefined,
-              { kind: "free_text", text: values[question.field] ?? "" },
-            ))
-          )
-            setError("Ответ не подтверждён. Проверьте состояние отправки.");
-        } finally {
-          setSending(false);
-        }
-        return;
-      }
-      if (question.kind === "choice") {
-        const choice = question.choices[Number(values[question.field])];
-        if (
-          !choice ||
-          values[question.field] === undefined ||
-          values[question.field] === ""
-        )
-          return;
-        value = choice.value;
-        label = choice.label;
-      } else if (question.kind === "multiple") {
-        value = selected[question.field] ?? [];
-        label = question.choices
-          .filter((choice) => (value as unknown[]).includes(choice.value))
-          .map((choice) => choice.label)
-          .join(", ");
-      } else if (question.kind === "number") {
-        value = Number(values[question.field]);
-        label = String(value);
-      } else if (question.kind === "range") {
-        const lower = Number(values[question.field] ?? 0);
-        const upper = values[question.field + ":upper"];
-        value = { lower, upper: upper ? Number(upper) : null };
-        label = `от ${lower} до ${upper || "неизвестной верхней границы"}`;
-      } else {
-        value = (values[question.field] ?? "").trim();
-        label = String(value);
-      }
-    }
+  const answers = Object.values(visited).flatMap((question) => {
+    if (other[question.field]) return [];
+    const answer = fieldAnswer(
+      question, values[question.field] ?? "", values[question.field + ":upper"] ?? "",
+      selected[question.field] ?? [], unknowns[question.field] ?? false,
+    );
+    return answer ? [answer] : [];
+  });
+  const invalid = Object.values(visited).some((question) => {
+    const path = question.field;
+    return !unknowns[path] && !other[path] &&
+      (question.kind === "number" || question.kind === "range") &&
+      Boolean(values[path] || values[path + ":upper"]) &&
+      !answers.some((answer) => answer.path === path);
+  });
+  async function apply(): Promise<void> {
+    if (!page?.current || disabled || sending || !answers.length || answers.length > 64 || invalid) return;
     setSending(true);
     setError("");
     try {
-      const accepted = await onAnswer(`${question.text} Ответ: ${label}`, {
-        base_revision_id: revisionId,
-        path: question.field,
-        target_id: question.target_id,
-        side_network_id: question.side_network_id,
-        value,
-        unknown,
-      });
-      if (!accepted)
-        setError(
-          "Ответ не подтверждён. Проверьте состояние отправки или откройте актуальный проект.",
-        );
+      if (!(await onAnswer("Применить уточнения проекта", {
+        base_revision_id: revisionId, answers,
+      }))) {
+        setError("Ответы не подтверждены. Проверьте состояние отправки или откройте актуальный проект.");
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+  async function sendOther(question: Question): Promise<void> {
+    if (!page?.current || disabled || sending) return;
+    const text = freeText[question.field];
+    if (!text?.trim()) return;
+    setSending(true);
+    setError("");
+    try {
+      if (!(await onAnswer(`${question.text} Другое: ${text}`, undefined, {
+        kind: "free_text", text,
+      }))) setError("Ответ не подтверждён. Проверьте состояние отправки.");
     } finally {
       setSending(false);
     }
@@ -216,8 +239,8 @@ export function ProjectClarifications({
         </span>
       </h4>
       <p>
-        Выбор варианта сохраняется без обращения к модели. «Другое» сохранит
-        свободный ответ в сессии и отправит его модели.
+        Выберите нужные ответы и примените их вместе. Свой ответ можно
+        отправить отдельно для обработки в чате.
       </p>
       {error && <p role="alert">{error}</p>}
       {page.questions.map((question) => (
@@ -225,26 +248,28 @@ export function ProjectClarifications({
           key={question.field}
           onSubmit={(event) => {
             event.preventDefault();
-            void answer(question);
+            if (other[question.field]) void sendOther(question);
           }}
         >
           <fieldset disabled={disabled || sending}>
             <legend>{question.text}</legend>
-            {other === question.field ? (
+            {other[question.field] ? (
               <label>
                 Свой ответ
                 <input
                   maxLength={500}
                   required
-                  value={values[question.field] ?? ""}
+                  value={freeText[question.field] ?? ""}
                   onChange={(event) =>
-                    setValues((old) => ({
+                    setFreeText((old) => ({
                       ...old,
                       [question.field]: event.target.value,
                     }))
                   }
                 />
               </label>
+            ) : unknowns[question.field] ? (
+              <p>Выбран ответ «Не знаю».</p>
             ) : question.kind === "choice" ? (
               <label>
                 Выберите вариант
@@ -368,41 +393,26 @@ export function ProjectClarifications({
               </label>
             )}
             <div className="question-actions">
-              {(question.kind !== "unsupported" ||
-                other === question.field) && (
-                <button
-                  type="submit"
-                  disabled={
-                    other !== question.field &&
-                    question.kind === "multiple" &&
-                    !selected[question.field]?.length
-                  }
-                >
-                  {other === question.field
-                    ? "Отправить свой ответ"
-                    : "Сохранить ответ"}
-                </button>
+              {other[question.field] && (
+                <button type="submit">Отправить свой ответ</button>
               )}
-              {question.kind !== "unsupported" && question.reason !== "conflict" && (
+              {!other[question.field] && question.kind !== "unsupported" && question.reason !== "conflict" && (
                 <button
                   type="button"
                   onClick={() => {
-                    void answer(question, true);
+                    setUnknowns((old) => ({ ...old, [question.field]: !old[question.field] }));
                   }}
                 >
-                  Не знаю
+                  {unknowns[question.field] ? "Отменить «Не знаю»" : "Не знаю"}
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => {
-                  setOther((old) =>
-                    old === question.field ? null : question.field,
-                  );
-                  setValues((old) => ({ ...old, [question.field]: "" }));
+                  setOther((old) => ({ ...old, [question.field]: !old[question.field] }));
                 }}
               >
-                {other === question.field ? "К вариантам" : "Другое"}
+                {other[question.field] ? "К вариантам" : "Другое"}
               </button>
             </div>
           </fieldset>
@@ -425,6 +435,17 @@ export function ProjectClarifications({
             Следующие вопросы
           </button>
         )}
+      </div>
+      {invalid && <p role="alert">Проверьте введённые числа и границы диапазона.</p>}
+      {answers.length > 64 && <p role="alert">За один раз можно применить до 64 ответов.</p>}
+      <div className="question-actions">
+        <button
+          type="button"
+          disabled={disabled || sending || invalid || !answers.length || answers.length > 64}
+          onClick={() => { void apply(); }}
+        >
+          Применить ответы ({answers.length})
+        </button>
       </div>
     </section>
   );
