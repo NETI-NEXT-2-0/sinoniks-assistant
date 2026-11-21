@@ -29,6 +29,7 @@ export function readReadiness(value: unknown): ReadinessReport | null {
     const items = value[key];
     if (!Array.isArray(items) || items.length > 4096 || !items.every(item => isRecord(item)
       && typeof item.subject === 'string' && typeof item.message === 'string'
+      && (item.answered_unknown === undefined || typeof item.answered_unknown === 'boolean')
       && (item.source === undefined || typeof item.source === 'string'))) return null;
   }
   if (!Array.isArray(value.checks) || !value.checks.every(item => isRecord(item)

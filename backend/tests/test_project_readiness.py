@@ -89,3 +89,28 @@ def test_tampered_native_objects_or_expert_rules_cannot_get_checked_status():
         report = readiness_report(request, result, altered)
         assert report["status"] == "conflict"
         assert any(item["code"] == "artifact_mismatch" for item in report["conflicts"])
+
+
+def test_known_incompatible_ntp_is_not_treated_as_just_missing_information():
+    raw = data_project()
+    raw["flows"][0].update(application="ntp", protocol="TCP")
+    _, result, _ = build(raw)
+    assert result["readiness"]["status"] == "conflict"
+    assert any(item["code"].startswith("ntp_") for item in result["readiness"]["conflicts"])
+
+
+def test_missing_diagram_cannot_get_checked_status():
+    request, result, artifacts = build(data_project())
+    artifacts.pop("diagram")
+    artifacts.pop("drawio")
+    assert readiness_report(request, result, artifacts)["status"] == "conflict"
+
+
+def test_solver_protected_side_assumption_is_visible_without_relabelling_open_networks():
+    raw = data_project()
+    raw["networks"][1]["trust"] = "open"
+    raw["protected_network_id"] = "plant"
+    _, result, _ = build(raw)
+    assert result["readiness"]["status"] == "preliminary"
+    assert result["readiness"]["assumptions"]
+    assert all(network["trust"] == "open" for network in result["networks"])

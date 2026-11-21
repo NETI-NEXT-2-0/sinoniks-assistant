@@ -7,6 +7,7 @@ from xml.etree.ElementTree import ParseError, fromstring
 
 from partner_agent.sinoniks_contract19 import FileFlow19, Requirements19
 from partner_agent.sinoniks_contract19_io import assess
+from partner_agent.sinoniks_data_rules import FIREWALL_ID
 from partner_agent.sinoniks_layout import Box, text_lines
 
 TITLES = {
@@ -15,6 +16,17 @@ TITLES = {
     "preliminary": "Предварительная схема",
     "conflict": "Есть противоречия",
     "unsupported": "Есть ограничения кейса",
+}
+SOLVER_CONFLICTS = {
+    "industrial_protocol_requires_two_way": "Промышленный протокол требует обмена с ответом.",
+    "ntp_requires_protected_destination": "По методике NTP должен передаваться в защищаемую сеть.",
+    "ntp_requires_one_time_source": "Для этого NTP-обмена нужен один источник времени.",
+    "ntp_requires_one_way_udp": "По методике NTP требует однонаправленный UDP.",
+    "automation_conflicts_with_file_direction": (
+        "Метод автоматизации противоречит направлению файлов."
+    ),
+    "usb_conflicts_with_file_method": "USB противоречит выбранному способу передачи.",
+    "usb_requires_node_a": "USB подключается непосредственно к Узлу А, а не к Узлу В.",
 }
 
 
@@ -43,7 +55,12 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                 raise ValueError("diagram mismatch")
             if not scene["pages"]:
                 raise ValueError("missing pages")
+            seen_rule_ids: set[str] = set()
             for page in scene["pages"]:
+                boxes = {box["id"] for box in page["boxes"]}
+                equipment = {FIREWALL_ID, "node-A", "core", "node-B"}
+                if result.get("synonyx") and not equipment <= boxes:
+                    raise ValueError("missing equipment")
                 diagram = next((node for node in root.findall("diagram")
                                 if node.get("id") == page["id"]), None)
                 if diagram is None:
@@ -53,10 +70,15 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                     if box["id"] not in cells or cells[box["id"]].get("value") != box["text"]:
                         raise ValueError("native object mismatch")
                 for edge in page["edges"]:
+                    if edge["source"] not in boxes or edge["target"] not in boxes:
+                        raise ValueError("dangling edge")
+                    seen_rule_ids.add(edge["rule_id"])
                     cell = cells.get(edge["id"])
                     if (cell is None or cell.get("source") != edge["source"]
                             or cell.get("target") != edge["target"]):
                         raise ValueError("native link mismatch")
+            if seen_rule_ids != {rule["rule_id"] for rule in expected}:
+                raise ValueError("missing or invented rule edges")
             for row, rule in zip(rows, expected, strict=True):
                 if any((row["number"] != rule["id"], row["id"] != rule["rule_id"],
                         row["from_network_id"] != rule["from"],
@@ -94,6 +116,19 @@ def readiness_report(
                               "blocking": issue.kind == "missing"})
     integrity = artifact_conflicts(result, artifacts)
     groups["conflicts"].extend(integrity)
+    seen: set[tuple[str, str | None]] = set()
+    for issue in result.get("unknowns", []):
+        reason, owner = issue.get("reason"), issue.get("flow_id")
+        if reason not in SOLVER_CONFLICTS or (reason, owner) in seen:
+            continue
+        seen.add((reason, owner))
+        groups["conflicts"].append({"code": reason, "path": None, "subject": "Условия обмена",
+                                    "message": SOLVER_CONFLICTS[reason], "answered_unknown": False})
+    for wish in request.requests_for_vendor:
+        if wish.kind == "unsupported":
+            groups["limitations"].append({"code": "vendor_request", "path": None,
+                                         "subject": "Пожелание продукту", "message": wish.text,
+                                         "answered_unknown": False})
     if result.get("synonyx") and not result.get("firewall"):
         groups["conflicts"].append({"code": "firewall_missing", "path": None,
                                     "subject": "Размещение", "answered_unknown": False,
@@ -110,32 +145,40 @@ def readiness_report(
                                  "blocking": False, "answered_unknown": False})
     referenced = {identifier for flow in request.flows
                   for identifier in [*flow.sender_ids, *flow.receiver_ids]}
+    referenced.update(automation.storage_id for flow in request.flows
+                      if isinstance(flow, FileFlow19)
+                      for side in flow.sides for automation in side.automations
+                      if automation.storage_id is not None)
     recommendations = [{"code": "unused_system", "subject": system.name or system.id,
                         "message": "Устройство не привязано к отправителю или получателю. "
                         "По желанию проверьте, нужен ли для него отдельный обмен.",
                         "source": "Сохранённые условия проекта"}
-                       for system in request.systems if system.id not in referenced]
+                       for system in request.systems if system.kind != "usb"
+                       and system.id not in referenced]
     for flow in request.flows:
         if isinstance(flow, FileFlow19) and any(side.checks == [] for side in flow.sides):
             recommendations.append({"code": "file_checks", "subject": flow.purpose or flow.id,
-                                    "message": "Явно выбрано отсутствие файловых проверок. "
+                                    "message": "На одной из сторон явно выбрано отсутствие "
+                                    "файловых проверок. "
                                     "Если появятся требования к фильтрации, можно дополнить "
                                     "правило поддерживаемыми проверками. "
                                     "Это необязательное изменение.",
                                     "source": "02_methodology.md · 3.2. Правила передачи файлов"})
+    assumptions = [{"subject": note.get("path") or "Выбор защищаемой стороны",
+                    "message": note["explanation"]}
+                   for note in result.get("assumptions", []) if note.get("explanation")]
     state = ("conflict" if groups["conflicts"] else
              "unsupported" if result.get("status") == "unsupported" else
              "needs_clarification" if any(item.get("blocking") and not item["answered_unknown"]
                                          for item in groups["missing"]) else
              "preliminary" if groups["missing"] or groups["limitations"]
-             or request.assumptions or result.get("confirmed_rules_count") is None else "checked")
+             or assumptions or result.get("confirmed_rules_count") is None else "checked")
     return {"schema_version": 1, "checker_version": "sinoniks19-1", "status": state,
             "title": TITLES[state],
             "summary": "Проверяются сохранённые условия, расчёт и согласованность выгрузок. "
             "Работу физического внедрения проверяет инженер.", **groups,
             "recommendations": recommendations,
-            "assumptions": [{"subject": note.path, "message": note.explanation}
-                            for note in request.assumptions],
+            "assumptions": assumptions,
             "checks": [{"code": "exports", "title": "Согласованность расчёта и выгрузок",
                         "status": "failed" if integrity else "passed"},
                        {"code": "minimum", "title": "Минимум правил подтверждён",
