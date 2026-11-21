@@ -7,11 +7,12 @@ from pathlib import Path
 from threading import Thread
 from xml.etree.ElementTree import Element, fromstring
 
+from playwright.sync_api import Page, Route, expect, sync_playwright
+
 from partner_agent.sinoniks_calculation import solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_export import scene_drawio
 from partner_agent.sinoniks_layout19 import layout19
-from playwright.sync_api import Page, Route, expect, sync_playwright
 
 INITIAL_NAME = "Сервер времени"
 EDITED_NAME = "Сервер & <архив>"
