@@ -1,7 +1,7 @@
 import { projectSourceError } from "./projectErrors";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, isRecord, type AuthClient } from "../api/client";
-import type { ProjectAnswerInput, ProjectFieldAnswerInput, SubmittedWishInput } from "../api/chats";
+import type { ProjectAnswerInput, ProjectFieldAnswerInput } from "../api/chats";
 import "./project-questions.css";
 
 interface Question {
@@ -109,7 +109,7 @@ export function ProjectClarifications({
   newer: boolean;
   disabled: boolean;
   refresh: number;
-  onAnswer: (message: string, answer?: ProjectAnswerInput, wish?: SubmittedWishInput) => Promise<boolean>;
+  onAnswer: (message: string, answer: ProjectAnswerInput) => Promise<boolean>;
   onReady: () => void;
   onExpired: () => void;
 }) {
@@ -185,37 +185,31 @@ export function ProjectClarifications({
     );
     return answer ? [answer] : [];
   });
+  const remarks = Object.values(visited).flatMap((question) => {
+    const text = freeText[question.field];
+    return showsFreeText(question) && text?.trim() ? [{
+      path: question.field, target_id: question.target_id, side_network_id: question.side_network_id,
+      text,
+    }] : [];
+  });
+  const count = answers.length + remarks.length;
   const invalid = Object.values(visited).some((question) => {
     const path = question.field;
-    return !unknowns[path] && !other[path] &&
+    return !unknowns[path] && !showsFreeText(question) &&
       (question.kind === "number" || question.kind === "range") &&
       Boolean(values[path] || values[path + ":upper"]) &&
       !answers.some((answer) => answer.path === path);
   });
   async function apply(): Promise<void> {
-    if (!page?.current || disabled || sending || !answers.length || answers.length > 64 || invalid) return;
+    if (!page?.current || disabled || sending || !count || count > 64 || invalid) return;
     setSending(true);
     setError("");
     try {
       if (!(await onAnswer("Применить уточнения проекта", {
-        base_revision_id: revisionId, answers,
+        base_revision_id: revisionId, answers, ...(remarks.length ? { remarks } : {}),
       }))) {
         setError("Ответы не подтверждены. Проверьте состояние отправки или откройте актуальный проект.");
       }
-    } finally {
-      setSending(false);
-    }
-  }
-  async function sendOther(question: Question): Promise<void> {
-    if (!page?.current || disabled || sending) return;
-    const text = freeText[question.field];
-    if (!text?.trim()) return;
-    setSending(true);
-    setError("");
-    try {
-      if (!(await onAnswer(`${question.text} Другое: ${text}`, undefined, {
-        kind: "free_text", text,
-      }))) setError("Ответ не подтверждён. Проверьте состояние отправки.");
     } finally {
       setSending(false);
     }
@@ -245,26 +239,19 @@ export function ProjectClarifications({
         </span>
       </h4>
       <p>
-        Выберите нужные ответы и примените их вместе. Свой ответ можно
-        отправить отдельно для обработки в чате.
+        Примените готовые варианты и свои ответы вместе. Свой текст
+        сохранится в пожеланиях чата как пояснение к вопросу.
       </p>
       {error && <p role="alert">{error}</p>}
       {page.questions.map((question) => (
-        <form
-          key={question.field}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (showsFreeText(question)) void sendOther(question);
-          }}
-        >
-          <fieldset disabled={disabled || sending}>
+          <fieldset key={question.field} disabled={disabled || sending}>
             <legend>{question.text}</legend>
             {showsFreeText(question) ? (
               <label>
                 Свой ответ
-                <input
+                <textarea
                   maxLength={500}
-                  required
+                  rows={2}
                   value={freeText[question.field] ?? ""}
                   onChange={(event) =>
                     setFreeText((old) => ({
@@ -394,9 +381,6 @@ export function ProjectClarifications({
               </label>
             )}
             <div className="question-actions">
-              {showsFreeText(question) && (
-                <button type="submit">Отправить свой ответ</button>
-              )}
               {!showsFreeText(question) && question.reason !== "conflict" && (
                 <button
                   type="button"
@@ -419,7 +403,6 @@ export function ProjectClarifications({
               )}
             </div>
           </fieldset>
-        </form>
       ))}
       <div className="question-actions">
         {offset > 0 && (
@@ -440,14 +423,14 @@ export function ProjectClarifications({
         )}
       </div>
       {invalid && <p role="alert">Проверьте введённые числа и границы диапазона.</p>}
-      {answers.length > 64 && <p role="alert">За один раз можно применить до 64 ответов.</p>}
+      {count > 64 && <p role="alert">За один раз можно применить до 64 ответов.</p>}
       <div className="question-actions">
         <button
           type="button"
-          disabled={disabled || sending || invalid || !answers.length || answers.length > 64}
+          disabled={disabled || sending || invalid || !count || count > 64}
           onClick={() => { void apply(); }}
         >
-          Применить ответы ({answers.length})
+          Применить ответы ({count})
         </button>
       </div>
     </section>

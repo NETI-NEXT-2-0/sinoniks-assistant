@@ -51,7 +51,11 @@ async def test_explicit_wish_survives_model_failure_cancel_and_repeat(plane, mon
 
         monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
         result = await execute_run(UUID(admitted.json()["run_id"]), dispatch_generation=0)
-        assert result["status"] == ending
+        assert result["status"] == "succeeded"
+        if ending == "failed":
+            run = await client.get(f"/api/v1/runs/{admitted.json()['run_id']}")
+            assert run.json()["outcome"]["code"] == "provider_request_failed"
+            assert run.json()["outcome"]["task_completed"] is False
     # Completion/cancellation replaced outcome; the admission receipt remains immutable.
     response = await client.get(path + "/vendor-wishes/export")
     assert response.json() == before

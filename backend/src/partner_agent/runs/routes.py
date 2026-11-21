@@ -13,7 +13,7 @@ from partner_agent.design_service import latest_revision, validate_project_sourc
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_stage2 import Message, ResumeCommand, Run
-from partner_agent.project_answers import ProjectAnswerCommand19, apply_answer
+from partner_agent.project_answers import ProjectAnswerBatch19, ProjectAnswerCommand19, apply_answer
 from partner_agent.runs.service import (
     admission_response,
     admit_run,
@@ -129,6 +129,12 @@ async def submit(
     if body.vendor_wish is not None:
         # The immutable admission receipt survives cancellation, crashes and outcome replacement.
         result = {**result, "vendor_wish": body.vendor_wish.model_dump(mode="json")}
+    if isinstance(body.project_answer, ProjectAnswerBatch19) and body.project_answer.remarks:
+        result = {**result, "project_answer_remarks": [
+            {**remark.model_dump(mode="json"), "kind": "free_text",
+             "base_revision_id": str(body.project_answer.base_revision_id)}
+            for remark in body.project_answer.remarks
+        ]}
     save_admission(db, chat, user, "run", idempotency_key or "", normalized, run, result)
     await db.commit()
     return result
