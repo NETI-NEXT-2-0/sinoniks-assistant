@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -191,7 +191,9 @@ def audit(benchmark_path: Path, results: Path) -> dict[str, Any]:
     if not isinstance(items, list) or not 1 <= len(items) <= 200:
         raise ValueError("Expected bounded benchmark items")
     seen = set()
+    filenames = set()
     cases = []
+    sessions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise ValueError("Invalid benchmark case")
@@ -216,6 +218,7 @@ def audit(benchmark_path: Path, results: Path) -> dict[str, Any]:
         follow_up = item.get("follow_up")
         if isinstance(follow_up, dict) and isinstance(follow_up.get("expected"), dict):
             phases.append(("follow_up", follow_up["expected"]))
+        initial_session = None
         for phase, expected in phases:
             case: dict[str, Any] = {
                 "id": identifier,
@@ -226,34 +229,52 @@ def audit(benchmark_path: Path, results: Path) -> dict[str, Any]:
                 "model_dialogue_verified": False,
                 "diagram_verified": False,
             }
-            if isinstance(expected, dict) and isinstance(expected.get("rules"), list):
-                if len(expected["rules"]) > 512 or any(
-                    type(expected.get(key)) is not int or expected[key] < 0
+            reference = (expected if isinstance(expected, dict)
+                         and isinstance(expected.get("rules"), list) else None)
+            if reference is not None:
+                if len(reference["rules"]) > 512 or any(
+                    type(reference.get(key)) is not int or reference[key] < 0
                     for key in ("rules_count", "file_users_count")
                 ):
                     raise ValueError("Invalid reference counts")
-                filename = identifier + ("-follow-up" if phase == "follow_up" else "") + ".json"
-                path = results / filename
-                if path.exists():
-                    if not path.resolve().is_relative_to(results.resolve()):
-                        raise ValueError("Result path leaves input directory")
-                    actual, result_digest = read_json(path)
-                    if not isinstance(actual, dict):
-                        raise ValueError("Expected expert JSON object")
-                    issues = compare_project(expected, actual)
-                    status = (
-                        "manual_review"
-                        if issues and all(issue.startswith("reference_") for issue in issues)
-                        else "fail"
-                        if issues
-                        else "pass"
-                    )
-                    case.update(
-                        structural_status=status, issues=issues, actual_sha256=result_digest
-                    )
-                else:
-                    case["structural_status"] = "missing"
+            filename = identifier + ("-follow-up" if phase == "follow_up" else "") + ".json"
+            if filename.casefold() in filenames:
+                raise ValueError("Result filenames collide")
+            filenames.add(filename.casefold())
+            path = results / filename
             cases.append(case)
+            if not path.exists():
+                if reference is not None:
+                    case["structural_status"] = "missing"
+                continue
+            if not path.resolve().is_relative_to(results.resolve()):
+                raise ValueError("Result path leaves input directory")
+            actual, result_digest = read_json(path)
+            if not isinstance(actual, dict):
+                raise ValueError("Expected expert JSON object")
+            issues = compare_project(reference, actual) if reference is not None else []
+            status = "pass" if reference is not None else "manual_review"
+            session = actual.get("session_id")
+            if not isinstance(session, str) or not session.strip():
+                issues.append("missing_session_id")
+            else:
+                session = session.strip()
+                sessions[session].append(case)
+                if phase == "initial":
+                    initial_session = session
+                elif initial_session is None:
+                    issues.append("reference_initial_session_not_verified")
+                elif session != initial_session:
+                    issues.append("follow_up_session_mismatch")
+            if issues:
+                status = ("manual_review" if all(issue.startswith("reference_") for issue in issues)
+                          else "fail")
+            case.update(structural_status=status, issues=issues, actual_sha256=result_digest)
+    for captures in sessions.values():
+        if len({case["id"] for case in captures}) > 1:
+            for case in captures:
+                case["issues"].append("session_reused_across_cases")
+                case["structural_status"] = "fail"
     totals = Counter(case["structural_status"] for case in cases)
     return {
         "schema_version": 1,

@@ -10,6 +10,7 @@ from partner_agent.benchmark_audit import audit, compare_project, main
 def project():
     return {
         "schema_version": "1.1",
+        "session_id": "private-session",
         "status": "completed",
         "networks": [{"id": "o", "trust": "open"}, {"id": "c", "trust": "closed"}],
         "firewall": {"side": "open"},
@@ -196,3 +197,54 @@ def test_reference_ambiguity_is_manual_review_without_fabricated_failure(tmp_pat
     report = audit(benchmark, tmp_path)
     assert report["structural_totals"]["manual_review"] == 1
     assert report["structural_totals"]["pass"] == 0
+
+
+def test_structurally_correct_artifacts_cannot_share_a_session_across_cases(tmp_path):
+    benchmark = tmp_path / "benchmark.json"
+    benchmark.write_text(json.dumps({"items": [
+        {"id": identifier, "expected": project()} for identifier in ("F01", "F02")
+    ]}))
+    for identifier in ("F01", "F02"):
+        (tmp_path / f"{identifier}.json").write_text(json.dumps(project()))
+    report = audit(benchmark, tmp_path)
+    assert report["structural_totals"]["fail"] == 2
+    assert all(row["issues"] == ["session_reused_across_cases"] for row in report["phases"])
+    assert "private-session" not in json.dumps(report)
+
+
+@pytest.mark.parametrize(
+    "initial,follow_up,expected_status,issues",
+    [
+        ("session-a", "session-a", "pass", []),
+        ("session-a", "session-b", "fail", ["follow_up_session_mismatch"]),
+        (None, "session-a", "manual_review", ["reference_initial_session_not_verified"]),
+        ("session-a", "", "fail", ["missing_session_id"]),
+    ],
+)
+def test_follow_up_session_is_checked_even_when_initial_phase_needs_manual_review(
+    tmp_path, initial, follow_up, expected_status, issues,
+):
+    benchmark = tmp_path / "benchmark.json"
+    benchmark.write_text(json.dumps({"items": [
+        {"id": "N05", "follow_up": {"expected": project()}},
+    ]}))
+    if initial is not None:
+        initial_result = project() | {"session_id": initial, "status": "preliminary"}
+        (tmp_path / "N05.json").write_text(json.dumps(initial_result))
+    (tmp_path / "N05-follow-up.json").write_text(
+        json.dumps(project() | {"session_id": follow_up})
+    )
+    first, second = audit(benchmark, tmp_path)["phases"]
+    assert first["structural_status"] == "manual_review"
+    assert second["structural_status"] == expected_status and second["issues"] == issues
+
+
+@pytest.mark.parametrize("identifier", ["N05-follow-up", "n05-FOLLOW-UP"])
+def test_follow_up_cannot_reuse_another_cases_filename(tmp_path, identifier):
+    benchmark = tmp_path / "benchmark.json"
+    benchmark.write_text(json.dumps({"items": [
+        {"id": "N05", "follow_up": {"expected": project()}},
+        {"id": identifier, "expected": project()},
+    ]}))
+    with pytest.raises(ValueError, match="Result filenames collide"):
+        audit(benchmark, tmp_path)
