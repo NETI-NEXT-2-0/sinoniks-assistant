@@ -17,14 +17,20 @@ account = account_data.get("account", account_data)
 origin = "http://localhost:8080"
 
 
+def open_accounting_panel(page):
+    heading = page.get_by_text("Расходы и время сессии", exact=True)
+    panel = page.locator("details.session-accounting").filter(has=heading)
+    panel.locator("summary").click()
+    return panel
+
+
 def verify_formatting_contract(page, ledger, path):
     """Synthetic UI-only values, separate from the actual API/download proof."""
     priced = json.loads(json.dumps(ledger))
     priced["summary"].update(estimated_cost_usd="1.08E-7", input_cost_usd="1.8E-8",
                              output_cost_usd="9E-8", provider_cost_usd="0.0018")
     page.route(path, lambda route: route.fulfill(json=priced))
-    panel = page.locator(".session-accounting")
-    panel.locator("summary").click()
+    panel = open_accounting_panel(page)
     expect(panel).to_contain_text("$1.0800e-7")
     expect(panel).to_contain_text("$0.0018")
     priced["summary"].update(estimated_cost_usd=None)
@@ -79,8 +85,7 @@ with sync_playwright() as session:
     assert ledger["mean_full_elapsed_ms"] == ledger["mean_elapsed_ms"]
     assert ledger["turns"][0]["turn_id"] == run_id
     assert ledger["accounting_complete"] is True
-    panel = page.locator(".session-accounting")
-    panel.locator("summary").click()
+    panel = open_accounting_panel(page)
     expect(panel).to_contain_text("Всего по снимку тарифов")
     expect(panel).to_contain_text("$0")
     expect(panel).not_to_contain_text("замер неполный")

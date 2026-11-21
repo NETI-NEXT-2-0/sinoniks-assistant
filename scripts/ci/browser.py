@@ -111,22 +111,37 @@ def verify_request_mode_controls(page):
     print("Request mode admission, reload, inherited intent and branch draft verified")
 
 
-def verify_diagram_export(panel, page, data):
+def verify_scene_export(diagram, scene, data):
+    pages = diagram.findall("./diagram")
+    assert [page.get("id") for page in pages] == [page["id"] for page in scene["pages"]]
+    rows = json.loads(diagram.attrib["data-rule-rows"])
+    assert rows == scene["rule_rows"]
+    assert [row["id"] for row in rows] == [rule["id"] for rule in data["rules"]]
+    assert len(rows) == data["counts"]["logical_exchanges"]
+    for page, expected in zip(pages, scene["pages"], strict=True):
+        cells = page.findall("./mxGraphModel/root/mxCell")
+        edges = {
+            cell.attrib["id"]: (cell.get("source"), cell.get("target"), cell.get("data-rule-id"))
+            for cell in cells if cell.get("edge") == "1"
+        }
+        assert edges == {
+            edge["id"]: (edge["source"], edge["target"], edge["rule_id"])
+            for edge in expected["edges"]
+        }, expected["id"]
+        vertices = {
+            cell.attrib["id"]: cell.get("value")
+            for cell in cells if cell.get("vertex") == "1"
+        }
+        assert vertices == {box["id"]: box["text"] for box in expected["boxes"]}, expected["id"]
+
+
+def verify_diagram_export(panel, page, scene, data):
+    expect(panel.get_by_role("img", name="Схема Синоникса", exact=False)).to_be_visible()
     with page.expect_download() as download:
         panel.get_by_role("button", name="Скачать схему draw.io", exact=True).click()
     assert download.value.suggested_filename.endswith(".drawio")
     diagram = ElementTree.parse(download.value.path()).getroot()
-    cells = diagram.findall("./diagram[@id='topology']/mxGraphModel/root/mxCell")
-    edges = {cell.attrib["id"]: (cell.get("source"), cell.get("target"))
-             for cell in cells if cell.get("edge") == "1"}
-    assert edges == {
-        item["id"]: (item["source"], item["target"]) for item in data["connections"]
-    }
-    vertices = {cell.attrib["id"] for cell in cells if cell.get("vertex") == "1"}
-    assert {node["id"] for node in data["network_nodes"] + data["device_nodes"]} <= vertices
-    expected_rules = {f"rule-{i}" for i in range(1, len(data["rules"]) + 1)}
-    rule_labels = {cell.attrib["id"] for cell in diagram.findall(".//mxCell")} & expected_rules
-    assert len(rule_labels) == data["counts"]["logical_exchanges"]
+    verify_scene_export(diagram, scene, data)
 
 
 def verify_rehearsal_example(page):
@@ -166,7 +181,14 @@ def verify_rehearsal_example(page):
     expect(panel.get_by_role("button", name="Скачать JSON", exact=True)).to_have_count(0)
     expect(example).to_have_count(0)
     receiver.fill("Хранилище отчётов")
-    save.click()
+    with page.expect_response(
+        lambda response: response.request.method == "GET"
+        and urlsplit(response.url).path.startswith("/api/v1/chats/")
+        and urlsplit(response.url).path.endswith("/diagram")
+    ) as rendered:
+        save.click()
+    snapshot = checked_json(rendered.value)
+    assert snapshot["revision"] == 2
     expect(panel.get_by_role("heading", name="Сохранённая версия 2", exact=True)).to_be_visible()
     with page.expect_download() as download:
         panel.get_by_role("button", name="Скачать JSON", exact=True).click()
@@ -176,7 +198,7 @@ def verify_rehearsal_example(page):
     assert data["counts"]["network_slot_pairs"] == 3
     assert data["counts"]["network_node_settings"] == 6
     assert data["counts"]["file_transfer_policies"] == 1
-    verify_diagram_export(panel, page, data)
+    verify_diagram_export(panel, page, snapshot["scene"], data)
     close.click()
     open_project.click()
     expect(receiver).to_have_value("Хранилище отчётов")
