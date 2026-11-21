@@ -49,6 +49,32 @@ def test_unknown_placement_is_not_described_as_confirmed_architecture():
     assert "Полный минимум пока не подтверждён" in artifacts["txt"]
 
 
+def test_installed_firewall_is_named_once_at_the_existing_boundary():
+    document = data_project()
+    original = Requirements19.model_validate(document)
+    explicit_null = Requirements19.model_validate({**document, "existing_firewall_name": None})
+    assert explicit_null.model_dump_json() == original.model_dump_json()
+    original_result, _ = result_artifacts19(original, session_id="session-1")
+    request = Requirements19.model_validate({**document, "existing_firewall_name": "МЭ-01"})
+    result, artifacts = result_artifacts19(request, session_id="session-1")
+    identity = {"id": "firewall", "name": "МЭ-01", "existing": True}
+    assert result["firewall"] == {"side": "open", **identity}
+    assert result["synonyx"] == original_result["synonyx"]
+    assert result["rules"] == original_result["rules"]
+    assert json.loads(artifacts["requirements"])["existing_firewall_name"] == "МЭ-01"
+    assert "используется установленный экран «МЭ-01»" in artifacts["txt"]
+    scene = json.loads(artifacts["diagram"])
+    assert scene["firewall"] == identity
+    for page in scene["pages"]:
+        firewall, = [box for box in page["boxes"] if box["kind"] == "firewall"]
+        assert firewall["id"] == identity["id"]
+        edges = [edge for edge in page["edges"] if edge["id"].endswith("-wall")]
+        assert all({edge["source"], edge["target"]} == {"firewall", "node-A"} for edge in edges)
+    xml = fromstring(artifacts["drawio"])
+    assert json.loads(xml.attrib["data-firewall"]) == identity
+    assert xml.find(".//mxCell[@value='МЭ-01']") is not None
+
+
 def test_automatic_bidirectional_files_keep_both_rules_and_pull_users():
     document = file_project()
     for side in document["flows"][0]["sides"]:

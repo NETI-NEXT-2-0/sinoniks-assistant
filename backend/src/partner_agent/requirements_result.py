@@ -51,6 +51,11 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
                 "Сети не соединяются напрямую, перенос проходит через изолированное Ядро.",
             ]
         )
+        if request.existing_firewall_name is not None:
+            lines.append(
+                "На этой границе используется установленный экран "
+                f"«{request.existing_firewall_name}»."
+            )
     else:
         lines.append("Размещение пока не определено: уточните две сети и защищаемую сторону.")
     if result.get("capacity_exceeded"):

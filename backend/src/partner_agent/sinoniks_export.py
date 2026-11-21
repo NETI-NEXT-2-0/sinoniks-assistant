@@ -48,6 +48,8 @@ def scene_drawio(scene: dict[str, Any]) -> str:
     file = Element("mxfile", {"host": "app.diagrams.net", "type": "device",
                              "data-rule-rows": json.dumps(scene.get("rule_rows", []),
                                                           ensure_ascii=False)})
+    if "firewall" in scene:
+        file.set("data-firewall", json.dumps(scene["firewall"], ensure_ascii=False))
     for page in scene["pages"]:
         diagram = SubElement(file, "diagram", id=page["id"], name=page["title"])
         model = SubElement(diagram, "mxGraphModel", {
