@@ -103,14 +103,18 @@ async def test_transport_failure_is_durable_and_unknown_cost_is_not_zero(
     submitted = await submit(client, headers, chat, text="Synthetic ordinary conversation")
     assert submitted.status_code == 202
     run_id = UUID(submitted.json()["run_id"])
-    assert (await execute_run(run_id, dispatch_generation=0))["status"] == "failed"
+    assert (await execute_run(run_id, dispatch_generation=0))["status"] == "succeeded"
     assert len(attempts) == 1 and stream.closed
     if failure == "length":
         assert stream.emitted == 0
     if failure == "trickle":
         assert stream.emitted < 100
     snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
-    assert not any(message["role"] == "assistant" for message in snapshot["messages"])
+    replies = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+    assert len(replies) == 1 and replies[0]["content"]
+    assert "synthetic private detail" not in replies[0]["content"]
+    assert snapshot["runs"][0]["outcome"]["task_completed"] is False
+    assert snapshot["runs"][0]["outcome"]["response_status"] == "needs_clarification"
     expected = {
         "length": "provider_response_too_large",
         "expansion": "provider_response_too_large",

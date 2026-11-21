@@ -165,3 +165,5 @@
 .message-sources .answer-source[open] summary.source-chip span{white-space:normal}
 .message-sources .answer-source summary:hover{color:var(--ink);background:var(--panel)}
 @media(pointer:coarse){.message-sources .answer-source summary.source-chip{min-height:44px}}
+
+.run-status.run-guidance{color:var(--secondary)}

@@ -91,7 +91,7 @@ def incomplete_scenario(proposal: dict, question: str) -> None:
 
 def fixture_body(messages: list[dict] | None = None) -> dict:
     if messages and "Синтетическая справка" in messages[-1]["content"].split("Evidence:", 1)[0]:
-        identifier = re.search(r"\[([0-9a-f-]{36})\]", messages[-1]["content"])
+        identifier = re.search(r"\[(source_[0-9]+)\]", messages[-1]["content"])
         assert identifier is not None
         result = {"mode": "grounded", "answer": "Контрольный факт: не более 256 правил.",
                   "citations": [{"evidence_id": identifier[1],
