@@ -1,9 +1,12 @@
+import re
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROUTER_ENDPOINT = "https://openrouter.ai/api/v1"
 
 
 class Settings(BaseSettings):
@@ -122,6 +125,18 @@ class Settings(BaseSettings):
             ))
         ):
             raise ValueError("contest mode requires an eligible declared model tariff and route")
+        if self.model_contest_mode and urlsplit(self.model_endpoint).hostname == "openrouter.ai":
+            if self.model_endpoint.rstrip("/") != ROUTER_ENDPOINT:
+                raise ValueError("contest routing requires the direct HTTPS router endpoint")
+            if (
+                self.model_name != self.model_catalog_id
+                or self.model_name.startswith("openrouter/")
+            ):
+                raise ValueError("contest routing requires the exact declared catalog model")
+            if not re.fullmatch(
+                r"[a-z0-9][a-z0-9.-]*(?:/[a-z0-9][a-z0-9.-]*)*", self.model_provider_variant,
+            ):
+                raise ValueError("contest routing requires a provider endpoint slug")
         return self
 
     @property
