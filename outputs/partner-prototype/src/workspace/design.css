@@ -11,7 +11,7 @@
 .design-fields :is(input,select){width:100%;min-width:0;min-height:38px;padding:8px 10px;background:var(--page);color:var(--ink);border:1px solid var(--stroke);border-radius:7px;font:inherit}
 .design-panel button{padding:9px 13px;border:1px solid var(--stroke);border-radius:7px;font-size:12px;background:var(--page);color:var(--ink)}
 .design-panel button:disabled{opacity:.5;cursor:default}
-.design-panel button[type=submit]{background:#ffdd2d;color:#242424;border-color:#ffdd2d}
+.design-panel button[type=submit]{background:var(--accent);color:#242424;border-color:var(--accent)}
 .design-content fieldset>button{margin-top:12px}.design-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
 .design-error{max-width:1100px;margin:0 auto 18px;border-left:3px solid #b7543f;padding:12px;font-size:13px;line-height:1.6}
 .design-error button{margin-left:10px}.design-result{border-top:1px solid var(--stroke);padding-top:20px}

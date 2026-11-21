@@ -1,0 +1,21 @@
+/* Shared action palette; the official logo and engineering diagram keep their own assets. */
+:root {
+  --accent: #f26e2b;
+  --accent-rgb: 242 110 43;
+  --accent-ink: #17242b;
+  --accent-border: #b44710;
+  --accent-text: #a43c09;
+  --hover: #e9601c;
+  --active: #e65f20;
+}
+
+:root:is([data-theme=dark], [data-theme=glass]) {
+  --accent-border: #f6a77e;
+  --accent-text: #f6a77e;
+}
+
+:root :is(.new-chat, .send, .appearance-done, .empty-new-chat,
+  .knowledge-primary, .clarification-options button, .chosen .theme-check,
+  .design-panel button[type=submit]) {
+  color: var(--accent-ink);
+}
