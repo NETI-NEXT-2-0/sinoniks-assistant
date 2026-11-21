@@ -249,5 +249,5 @@ export function useWorkspace(auth: AuthClient, onExpired: () => void) {
   return { turnStarts: turnStarts.current, chats, nextCursor, selected, snapshot, loading, listLoading, error, setError, connection,
     command, sending, acting, historyLoading, loadOlder, draft, setDraft, requestMode, setRequestMode, create, send, execute, cancel, rename, remove, selectChat,
     refreshList, retry: () => command ? execute(command) : Promise.resolve(false),
-    refresh: () => selected ? selectChat(selected, snapshot?.selected_branch_id) : refreshList() };
+    refresh: () => selected ? selectChat(selected, branchRef.current) : refreshList() };
 }

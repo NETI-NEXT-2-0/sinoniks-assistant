@@ -23,6 +23,7 @@ from partner_agent.sinoniks_contract19 import (
 )
 from partner_agent.sinoniks_data_rules import calculate_data_rules
 from partner_agent.sinoniks_export import scene_drawio
+from partner_agent.sinoniks_file_rules import has_unidentified_manual_users
 from partner_agent.sinoniks_layout19 import layout19
 from partner_agent.sinoniks_result_export import export_result
 
@@ -170,9 +171,14 @@ def assess(request: Requirements19) -> Assessment19:
                 path = root + f"/sides/{side_index}"
                 if side.manual is None and side.usb is None and not side.automations:
                     issue(path + "/manual", "Как файлы попадают на узел и забираются с него?")
-                for field in ("checks", "received_files_shared"):
-                    if getattr(side, field) is None:
-                        issue(path + "/" + field, "Уточните проверки и разделение доступа.")
+                if side.checks is None:
+                    issue(path + "/checks", "Уточните проверки файлов на этой стороне.")
+                receives_files = (
+                    flow.direction != "forward" or side.network_id != flow.sender_network_id
+                )
+                if receives_files and side.received_files_shared is None:
+                    issue(path + "/received_files_shared",
+                          "Могут ли получатели видеть общие файлы?")
                 for n, automatic in enumerate(side.automations):
                     for field in ("protocol", "storage_id"):
                         if getattr(automatic, field) is None:
@@ -183,9 +189,10 @@ def assess(request: Requirements19) -> Assessment19:
                         issue(path + f"/checks/{check_index}",
                               "Эта проверка — пожелание вендору, а не функция продукта.",
                               "unsupported")
-            if request.manual_users is None:
-                issue("/manual_users", "Уточните число ручных пользователей для лицензии.",
-                      "optional")
+    if request.manual_users is None and has_unidentified_manual_users(
+        flow for flow in request.flows if isinstance(flow, FileFlow19)
+    ):
+        issue("/manual_users", "Уточните число ручных пользователей для лицензии.", "optional")
     # Several file flows can refer to the same optional session-wide user count.
     issues = list({(item.path, item.kind): item for item in issues}.values())
     blocking = any(item.kind in {"missing", "conflict"} and not item.answered_unknown

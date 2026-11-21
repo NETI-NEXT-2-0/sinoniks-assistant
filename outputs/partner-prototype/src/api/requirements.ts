@@ -86,7 +86,8 @@ export interface CalculatedResult19 {
   synonyx: { node_a_network_id: string; node_b_network_id: string } | null;
   rules: { id: number; rule_id: string; type: 'data' | 'file'; from: string; to: string;
     description: string; mode: string; protocol: string | Record<string, string | null> | null;
-    port: number | null; checks?: string[] }[];
+    port: number | null; checks?: string[];
+    directions?: { access_groups?: Record<string, string | null> }[] }[];
 }
 export interface RequirementsRevision {
   id: string;
