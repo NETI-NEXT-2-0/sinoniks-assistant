@@ -8,13 +8,14 @@ import { Workspace } from './workspace/Workspace';
 import { mountVideoBackdrop } from './scene';
 import './style.css';
 import './themes.css';
+import './brand.css';
 import './auth.css';
 import { EntryPage } from './entry/EntryPage';
 import './entry/entry.css';
 
 const themes = [
   { id: 'standard', name: 'Стандартная', caption: 'Чистый фон. Чёткий фокус.' },
-  { id: 'dark', name: 'Тёмная', caption: 'Графит и жёлтые акценты.' },
+  { id: 'dark', name: 'Тёмная', caption: 'Графит и оранжевые акценты.' },
   { id: 'glass', name: 'Liquid Glass', caption: 'Свет, глубина и преломление.' },
   { id: 'mixed', name: 'Смешанная', caption: 'Стекло там, где оно нужно.' },
 ] as const;
