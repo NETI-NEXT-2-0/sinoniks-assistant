@@ -102,6 +102,27 @@ def test_known_check_parameters_are_requested_without_inventing_a_second_scope()
                for item in question_choices(explicit_request))
 
 
+def test_file_checks_are_editable_labels_and_match_native_rule_metadata():
+    raw = file_project()
+    raw["flows"][0]["sides"][0]["checks"] = [
+        {"kind": "name_mask", "details": "*.nc"},
+        {"kind": "size"},
+        {"kind": "icap", "icap_service": "antivirus"},
+    ]
+    request, result, artifacts = build(raw)
+    native = fromstring(artifacts["drawio"])
+    rows = json.loads(native.attrib["data-rule-rows"])
+    directions = result["rules"][0]["directions"]
+    assert [direction["checks_by_network"] for direction in rows[0]["file_check_directions"]] == [
+        direction["checks_by_network"] for direction in directions
+    ]
+    labels = "\n".join(cell.get("value", "") for cell in native.findall(".//mxCell"))
+    assert "маска имени (*.nc)" in labels
+    assert "размер (параметр не задан)" in labels
+    assert "ICAP: внешний антивирус" in labels
+    assert not readiness_report(request, result, artifacts)["conflicts"]
+
+
 def test_explicit_unknown_and_optional_port_remain_preliminary_not_a_fake_failure():
     for field in ("mode", "destination_port"):
         raw = data_project()

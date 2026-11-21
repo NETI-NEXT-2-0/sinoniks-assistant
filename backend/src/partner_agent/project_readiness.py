@@ -95,6 +95,15 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                     row["protocol"] != rule["protocol"] or row["destination_port"] != rule["port"]
                 ):
                     raise ValueError("protocol mismatch")
+                if rule["type"] == "file":
+                    directions = [
+                        {key: direction[key] for key in (
+                            "from_network_id", "to_network_id", "checks_by_network",
+                        )}
+                        for direction in rule["directions"]
+                    ]
+                    if row.get("file_check_directions") != directions:
+                        raise ValueError("file checks mismatch")
         return []
     except (ValueError, TypeError, KeyError, ParseError):
         return [{"code": "artifact_mismatch", "path": None, "subject": "Выгрузки",

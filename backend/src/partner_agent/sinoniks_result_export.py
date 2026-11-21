@@ -32,7 +32,7 @@ def export_data_rule(rule: DataRule, number: int) -> dict[str, object]:
     }
 
 
-def _check_label(check: FileCheck19) -> str:
+def check_label(check: FileCheck19) -> str:
     if check.kind == "icap":
         return {
             "antivirus": "ICAP: внешний антивирус",
@@ -69,7 +69,7 @@ def export_file_rule(
             if setting is not None and setting.protocol is not None:
                 labels_on_side.add(f"{setting.protocol}, {setting.operation}")
             supported = [check for check in (side.checks or []) if check.kind != "unsupported"]
-            labels.update(_check_label(check) for check in supported)
+            labels.update(check_label(check) for check in supported)
             if network_id in nodes:
                 checks[nodes[network_id]] = (
                     None if side.checks is None else

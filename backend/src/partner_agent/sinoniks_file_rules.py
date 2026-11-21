@@ -39,17 +39,20 @@ class FileLane:
             (self.source, self.pull), (self.destination, self.push),
         ) if setting is not None}
 
+    def checks_by_network(self) -> dict[str, list[dict[str, object]] | None]:
+        return {
+            side.network_id: None if checks is None else [json.loads(check) for check in checks]
+            for side in (self.source, self.destination)
+            for checks in [_checks(side)]
+        }
+
     def as_dict(self) -> dict[str, object]:
         sources = {(item.kind, item.reference, item.revision): item for flow in self.flows
                    for item in flow.sources}
         return {
             "from_network_id": self.source.network_id,
             "to_network_id": self.destination.network_id,
-            "checks_by_network": {
-                side.network_id: None if checks is None else [json.loads(check) for check in checks]
-                for side in (self.source, self.destination)
-                for checks in [_checks(side)]
-            },
+            "checks_by_network": self.checks_by_network(),
             "methods_by_network": {side.network_id: self.methods_on(side.network_id)
                                    for side in (self.source, self.destination)},
             "automations": {

@@ -21,6 +21,7 @@ from partner_agent.sinoniks_layout import (
     _text,
     text_lines,
 )
+from partner_agent.sinoniks_result_export import check_label
 
 RULES_PER_PAGE = 3
 ENDPOINTS_PER_SIDE = 16
@@ -54,6 +55,8 @@ class DisplayRule:
     provisional: bool = False
     primary_senders: list[Endpoint] | None = None
     primary_receivers: list[Endpoint] | None = None
+    file_check_directions: list[dict[str, object]] | None = None
+    file_check_summary: str = ""
 
     def table_row(self) -> dict[str, object]:
         return {
@@ -67,6 +70,8 @@ class DisplayRule:
             "protocol": self.protocol, "destination_port": self.destination_port,
             "service": self.service, "policy": self.policy,
             "two_way": self.two_way, "provisional": self.provisional,
+            **({"file_check_directions": self.file_check_directions}
+               if self.file_check_directions is not None else {}),
         }
 
 
@@ -118,7 +123,7 @@ class LayoutContext:
             provisional=rule.protocol is None,
         )
 
-    def file(self, rule: FileRule, number: int) -> DisplayRule:
+    def file(self, rule: FileRule, number: int, network_names: dict[str, str]) -> DisplayRule:
         lane = rule.primary_lane
         primary_senders = self.file_endpoints(lane, True)
         primary_receivers = self.file_endpoints(lane, False)
@@ -142,6 +147,27 @@ class LayoutContext:
                 if manual is not None:
                     methods.add("SFTP вручную" if manual == "SFTP" else "Вручную")
         description = ", ".join(sorted(methods)) or "Файлы"
+        checks_by_direction: list[dict[str, object]] = [
+            {"from_network_id": direction.source.network_id,
+             "to_network_id": direction.destination.network_id,
+             "checks_by_network": direction.checks_by_network()}
+            for direction in rule.lanes
+        ]
+        check_lines = []
+        for direction in rule.lanes:
+            for side in (direction.source, direction.destination):
+                labels = []
+                for check in side.checks or []:
+                    if check.kind == "unsupported":
+                        continue
+                    label = check_label(check)
+                    if check.details is not None:
+                        label += f" ({check.details})"
+                    elif check.kind in ("name_mask", "size", "type_extension"):
+                        label += " (параметр не задан)"
+                    labels.append(label)
+                if labels:
+                    check_lines.append(f"{network_names[side.network_id]}: {', '.join(labels)}")
         return DisplayRule(
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),
             list(dict.fromkeys(receivers)), rule.direction == "both", description,
@@ -150,6 +176,8 @@ class LayoutContext:
             lane.source.network_id, lane.destination.network_id, file=True,
             provisional=any(direction.provisional for direction in rule.lanes),
             primary_senders=primary_senders, primary_receivers=primary_receivers,
+            file_check_directions=checks_by_direction,
+            file_check_summary="; ".join(dict.fromkeys(check_lines)),
         )
 
 
@@ -351,6 +379,8 @@ def _page(
                 f"{rule.label} · {direction}")
         if rule.provisional:
             text += " · предварительно"
+        if rule.file_check_summary:
+            text += "\nПроверки файлов · " + rule.file_check_summary
         page.boxes.append(Box(f"rule-marker-{rule.number}", "", 26, top + 22, 12, 12,
                               "detail", COLORS[(rule.number - 1) % len(COLORS)], radius=2))
         top += _text(page, f"rule-{rule.number}", text, 48, top + 6, 1338,
@@ -492,10 +522,10 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
         return {**scene, "placement_pending": True, "rule_rows": [],
                 "pages": [asdict(page) for page in _unplaced_topology(request)]}
     context = LayoutContext({system.id: system for system in request.systems}, placement)
-    rules = [context.data(rule, number) for number, rule in enumerate(result.data.rules, 1)]
-    rules.extend(context.file(rule, number)
-                 for number, rule in enumerate(result.files.rules, len(rules) + 1))
     networks = {network.id: network.name or network.id for network in request.networks}
+    rules = [context.data(rule, number) for number, rule in enumerate(result.data.rules, 1)]
+    rules.extend(context.file(rule, number, networks)
+                 for number, rule in enumerate(result.files.rules, len(rules) + 1))
     names = (networks[placement.node_a_network_id], networks[placement.node_b_network_id])
     count = (f"Правил Синоникса: {result.minimum}" if result.minimum is not None else
              f"Предварительный расчёт · минимум {result.lower_bound}")
