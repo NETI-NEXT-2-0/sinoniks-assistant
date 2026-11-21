@@ -98,6 +98,11 @@ async def test_saved_project_reads_exports_writes_and_ancestors_follow_sources(
             response = await client.post(url, headers=headers)
             assert response.status_code == 200
             archives[url] = response.content
+        if row["input"]["schema_version"] == 3:
+            url = base + f"/{row['id']}/download/json?include_accounting=true"
+            response = await client.post(url, headers=headers)
+            assert response.status_code == 200
+            archives[url] = response.content
         if "diagram" in artifacts:
             url = base + f"/{row['id']}/diagram"
             response = await client.get(url)

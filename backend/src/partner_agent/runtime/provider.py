@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from partner_agent.infra.settings import Settings
+from partner_agent.infra.settings import ROUTER_ENDPOINT, Settings
 from partner_agent.runtime.accounting import track_model_call
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -275,6 +275,17 @@ async def chat_completion(
     if settings.model_wire_api == "chat_completions":
         payload = {"model": settings.model_name, "messages": messages, "stream": False,
                    "max_tokens": settings.model_max_output_tokens}
+    if settings.model_contest_mode and settings.model_endpoint.rstrip("/") == ROUTER_ENDPOINT:
+        payload["provider"] = {
+            "order": [settings.model_provider_variant],
+            "only": [settings.model_provider_variant],
+            "allow_fallbacks": False,
+            "max_price": {
+                "prompt": settings.model_input_usd_per_million,
+                "completion": settings.model_output_usd_per_million,
+                "request": 0,
+            },
+        }
     async with track_model_call(settings) as captured:
         body: Any = None
         try:
@@ -315,6 +326,8 @@ async def stream_completion(
     """Open an explicit SSE completion stream; caller controls cancellation."""
     if settings.runtime_profile != "openai_compatible":
         raise ProviderError("provider_disabled_in_offline_profile")
+    if settings.model_contest_mode:
+        raise ProviderError("provider_contest_requires_metered_completion")
     path = "/responses" if settings.model_wire_api == "responses" else "/chat/completions"
     endpoint = settings.model_endpoint.rstrip("/") + path
     payload = {"model": settings.model_name, "input": messages, "stream": True}

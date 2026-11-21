@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 
+from partner_agent.accounting_routes import read_session_accounting
 from partner_agent.auth.routes import DB, api_rate_limit, authenticated, unsafe_session
 from partner_agent.chats.routes import selected_branch
 from partner_agent.design_service import (
@@ -21,6 +22,7 @@ from partner_agent.design_service import (
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models_designs import DesignRevision
 from partner_agent.project_answers import question_choices
+from partner_agent.requirements_result import expert_accounting
 from partner_agent.runs.service import lock_chat
 from partner_agent.sinoniks_contract import DesignInput
 from partner_agent.sinoniks_contract19 import Requirements19
@@ -238,6 +240,7 @@ async def diagram(
 async def download(
     chat_id: UUID, design_id: UUID, extension: Literal["json", "drawio", "txt", "requirements"],
     request: Request, db: DB,
+    include_accounting: bool = False,
 ) -> Response:
     await unsafe_session(request, db)
     _, actor = await authenticated(request, db)
@@ -249,6 +252,15 @@ async def download(
     content = row.artifacts.get(extension)
     if content is None:
         raise APIError(409, "design_incomplete", "Complete the project before downloading")
+    if include_accounting:
+        if extension != "json" or row.input.get("schema_version") != 3:
+            raise APIError(422, "expert_export_requires_v3_json", "Select requirements 1.9 JSON")
+        result = json.loads(content)
+        ledger = await read_session_accounting(chat_id, db)
+        result.update(expert_accounting(ledger))
+        result["revision_id"] = str(row.id)
+        result["configuration_sha256"] = hashlib.sha256(content.encode()).hexdigest()
+        content = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     data = content.encode()
     await db.commit()
     return Response(data, media_type="application/octet-stream", headers={
