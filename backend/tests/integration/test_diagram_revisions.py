@@ -12,6 +12,7 @@ from test_chat_data_plane import new_chat, submit
 from test_chat_data_plane import plane as plane
 from test_design_execution import reply
 from test_design_revisions import design_input
+from test_requirements_revisions import data_project
 from test_response_execution import configure_execution
 
 from partner_agent.infra.db import session_factory
@@ -71,6 +72,36 @@ async def test_legacy_scene_is_not_regenerated_or_artifacts_mutated_by_get(plane
         assert (await db.get(DesignRevision, identifier)).artifacts == original
     file = await client.post(base + f"/{identifier}/download/drawio", headers=headers)
     assert file.text == original["drawio"]
+
+
+async def test_preview_is_available_before_rules_and_archived_after_edit(plane):
+    client, headers, _ = await plane()
+    chat = await new_chat(client, headers)
+    branch, base = chat["default_branch_id"], f"/api/v1/chats/{chat['id']}/designs"
+    conditions = data_project()
+    flow = conditions["flows"][0]
+    receivers = flow["receiver_ids"]
+    flow["receiver_ids"] = []
+    command_headers = {**headers, "Idempotency-Key": str(uuid.uuid4())}
+    first = await client.post(
+        base, headers=command_headers, json={"branch_id": branch, "input": conditions},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+    preview_url = base + f"/{first_id}/diagram"
+    preview = (await client.get(preview_url)).json()
+    assert preview["scene"]["rule_rows"] == []
+
+    flow["receiver_ids"] = receivers
+    second = await client.post(
+        base, headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
+        json={"branch_id": branch, "parent_id": first_id, "input": conditions},
+    )
+    assert second.status_code == 201
+    assert second.json()["result"]["confirmed_rules_count"] == 1
+    calculated = (await client.get(base + f"/{second.json()['id']}/diagram")).json()
+    assert len(calculated["scene"]["rule_rows"]) == 1
+    assert (await client.get(preview_url)).json() == preview
 
 
 async def test_mixed_project_keeps_all_flow_links_through_extraction_and_exports(

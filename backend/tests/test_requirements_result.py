@@ -75,6 +75,32 @@ def test_installed_firewall_is_named_once_at_the_existing_boundary():
     assert xml.find(".//mxCell[@value='МЭ-01']") is not None
 
 
+def test_preview_displays_known_systems_before_any_rule_can_be_calculated():
+    document = data_project()
+    document["flows"][0]["receiver_ids"] = []
+    request = Requirements19.model_validate(document)
+    result, artifacts = result_artifacts19(request, session_id="early-preview")
+    assert result["rules_count"] == 0 and result["confirmed_rules_count"] is None
+    scene = json.loads(artifacts["diagram"])
+    assert scene["rule_rows"] == []
+    page, = scene["pages"]
+    assert page["edges"] == []
+    boxes = {box["id"]: box for box in page["boxes"]}
+    assert "Офис" in boxes["open-zone"]["text"] and "Цех" in boxes["closed-zone"]["text"]
+    assert "Связи пока не рассчитаны" in boxes["pending-rules"]["text"]
+    assert {box["text"] for box in page["boxes"] if box["id"].startswith("endpoint-")} == {
+        system.name for system in request.systems
+    }
+    xml = fromstring(artifacts["drawio"])
+    assert xml.findall(".//mxCell[@edge='1']") == []
+
+    document["systems"] = []
+    document["flows"][0]["sender_ids"] = []
+    empty = Requirements19.model_validate(document)
+    _, no_topology = result_artifacts19(empty, session_id="early-preview")
+    assert "diagram" not in no_topology and "drawio" not in no_topology
+
+
 def test_automatic_bidirectional_files_keep_both_rules_and_pull_users():
     document = file_project()
     for side in document["flows"][0]["sides"]:
