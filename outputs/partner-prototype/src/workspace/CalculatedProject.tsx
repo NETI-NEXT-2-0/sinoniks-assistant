@@ -21,6 +21,12 @@ export function CalculatedProject({
   if (!result) return null;
   const network = (id: string): string =>
     result.networks.find((item) => item.id === id)?.name ?? "Сеть без названия";
+  const users = result.file_users_count;
+  const userRange = result.file_users_range;
+  const userCount = users !== null ? String(users)
+    : userRange === null ? "неизвестно"
+    : userRange.max === null ? `не менее ${userRange.min}`
+    : `${userRange.min}–${userRange.max}`;
   async function download(extension: string): Promise<void> {
     setBusy(true);
     setError("");
@@ -55,13 +61,7 @@ export function CalculatedProject({
           ? `Полный минимум не подтверждён. Нижняя оценка: ${result.rules_lower_bound}; в предварительном наборе: ${result.rules_count}.`
           : `Минимальное число правил Синоникса: ${result.confirmed_rules_count}.`}
       </p>
-      <p>
-        {result.file_users_count === null
-          ? result.file_users_range
-            ? `Пользователей передачи файлов: ${result.file_users_range.min}–${result.file_users_range.max ?? "верхняя граница неизвестна"}.`
-            : "Число пользователей передачи файлов не определено."
-          : `Пользователей передачи файлов: ${result.file_users_count}.`}
-      </p>
+      <p>Пользователей передачи файлов: {userCount}.</p>
       {revision.artifact_sha256?.diagram ? (
         <DiagramViewer
           auth={auth}
@@ -93,7 +93,14 @@ export function CalculatedProject({
             {result.rules.map((rule) => (
               <tr key={rule.rule_id}>
                 <td>{rule.id}</td>
-                <td>{rule.description}</td>
+                <td>
+                  {rule.description}
+                  {Object.entries(rule.directions?.[0]?.access_groups ?? {})
+                    .filter(([, group]) => group !== null)
+                    .map(([id, group]) => (
+                      <div key={id}>Группа доступа ({network(id)}): {group}</div>
+                    ))}
+                </td>
                 <td>
                   {network(rule.from)} {rule.mode === "two-way" ? "↔" : "→"}{" "}
                   {network(rule.to)}
