@@ -55,7 +55,9 @@
 Полный check до интеграции соседних 07/09: 521 backend/18 frontend,
 Ruff/mypy 94/TypeScript/build. PostgreSQL: 211 passed, 564 deselected,
 четыре прежних Hatchet warnings без selected skips. Отдельный supplied-corpus
-storage-прогон и браузер прошли. Итог после синхронизации фиксируется в progress.md.
+storage-прогон и браузер прошли. После синхронизации07/09 и исправления резерва: 523 backend/18 frontend,
+217 PostgreSQL (566 deselected), Ruff/mypy94/TS/build, прежние четыре warnings.
+Повторный storage-прогон на корпусе прошёл.
 Для разработки используются отдельные исходники, контейнеры и PostgreSQL.
 Демонстрация localhost:8080 и её dist не обновляются.
 
