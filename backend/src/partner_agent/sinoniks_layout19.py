@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 
 from partner_agent.sinoniks_calculation import RuleCalculation
-from partner_agent.sinoniks_contract19 import Requirements19, System19
+from partner_agent.sinoniks_contract19 import DataFlow19, FileCheck19, Requirements19, System19
 from partner_agent.sinoniks_data_rules import (
     FIREWALL_ID,
     RULE_LIMIT,
@@ -21,9 +21,24 @@ from partner_agent.sinoniks_layout import (
     _text,
     text_lines,
 )
+from partner_agent.sinoniks_result_export import check_label
 
 RULES_PER_PAGE = 3
 ENDPOINTS_PER_SIDE = 16
+
+
+def _check_summary(checks: list[FileCheck19] | None) -> str:
+    labels = []
+    for check in checks or []:
+        if check.kind == "unsupported":
+            continue
+        label = check_label(check)
+        if check.details is not None:
+            label += f" ({check.details})"
+        elif check.kind in ("name_mask", "size", "type_extension"):
+            label += " (параметр не задан)"
+        labels.append(label)
+    return ", ".join(labels)
 
 
 @dataclass(frozen=True)
@@ -54,6 +69,8 @@ class DisplayRule:
     provisional: bool = False
     primary_senders: list[Endpoint] | None = None
     primary_receivers: list[Endpoint] | None = None
+    file_check_directions: list[dict[str, object]] | None = None
+    file_check_summary: str = ""
 
     def table_row(self) -> dict[str, object]:
         return {
@@ -67,6 +84,8 @@ class DisplayRule:
             "protocol": self.protocol, "destination_port": self.destination_port,
             "service": self.service, "policy": self.policy,
             "two_way": self.two_way, "provisional": self.provisional,
+            **({"file_check_directions": self.file_check_directions}
+               if self.file_check_directions is not None else {}),
         }
 
 
@@ -118,7 +137,7 @@ class LayoutContext:
             provisional=rule.protocol is None,
         )
 
-    def file(self, rule: FileRule, number: int) -> DisplayRule:
+    def file(self, rule: FileRule, number: int, network_names: dict[str, str]) -> DisplayRule:
         lane = rule.primary_lane
         primary_senders = self.file_endpoints(lane, True)
         primary_receivers = self.file_endpoints(lane, False)
@@ -142,6 +161,12 @@ class LayoutContext:
                 if manual is not None:
                     methods.add("SFTP вручную" if manual == "SFTP" else "Вручную")
         description = ", ".join(sorted(methods)) or "Файлы"
+        check_lines = []
+        for direction in rule.lanes:
+            for side in (direction.source, direction.destination):
+                summary = _check_summary(side.checks)
+                if summary:
+                    check_lines.append(f"{network_names[side.network_id]}: {summary}")
         return DisplayRule(
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),
             list(dict.fromkeys(receivers)), rule.direction == "both", description,
@@ -150,6 +175,8 @@ class LayoutContext:
             lane.source.network_id, lane.destination.network_id, file=True,
             provisional=any(direction.provisional for direction in rule.lanes),
             primary_senders=primary_senders, primary_receivers=primary_receivers,
+            file_check_directions=rule.check_directions(),
+            file_check_summary="; ".join(dict.fromkeys(check_lines)),
         )
 
 
@@ -351,6 +378,8 @@ def _page(
                 f"{rule.label} · {direction}")
         if rule.provisional:
             text += " · предварительно"
+        if rule.file_check_summary:
+            text += "\nПроверки файлов · " + rule.file_check_summary
         page.boxes.append(Box(f"rule-marker-{rule.number}", "", 26, top + 22, 12, 12,
                               "detail", COLORS[(rule.number - 1) % len(COLORS)], radius=2))
         top += _text(page, f"rule-{rule.number}", text, 48, top + 6, 1338,
@@ -405,10 +434,12 @@ def _topology_pages(
 
 def diagram_unavailability19(request: Requirements19, result: RuleCalculation) -> str | None:
     rule_count = len(result.data.rules) + len(result.files.rules)
-    if result.data.placement is None:
-        return "A protected network is required for the diagram"
     if result.capacity_exceeded or rule_count > RULE_LIMIT:
         return "The selected rules exceed a single appliance diagram"
+    if result.data.placement is None:
+        if not _topology_systems(request):
+            return "The preview requires a named system in a known network"
+        return None
     if not rule_count and (
         not all(network.name for network in request.networks) or not _topology_systems(request)
     ):
@@ -416,17 +447,94 @@ def diagram_unavailability19(request: Requirements19, result: RuleCalculation) -
     return None
 
 
+def _unplaced_topology(request: Requirements19) -> list[Page]:
+    names = {network.id: network.name or "Сеть без названия" for network in request.networks}
+    members = _topology_systems(request)
+    groups = [[system for system in members if system.network_id == network.id]
+              for network in request.networks]
+    pages: list[Page] = []
+    for start in range(0, max(map(len, groups)), ENDPOINTS_PER_SIDE):
+        number = len(pages) + 1
+        page = Page(f"preview-{number}", f"Предварительная топология · {number}")
+        _text(page, "title", "Предварительная топология", 26, 12, 1380, size=22)
+        _text(page, "placement", "Размещение оборудования требует уточнения.", 26, 58, 1380)
+        bottom = 130
+        for index, (network, systems) in enumerate(zip(request.networks, groups, strict=True)):
+            left = 26 + index * 710
+            trust = {"open": "Открытая", "closed": "Закрытая"}.get(
+                network.trust or "", "Доверие неизвестно",
+            )
+            protected = (
+                " · защищаемая по условиям" if network.id == request.protected_network_id else ""
+            )
+            caption = text_lines(f"{names[network.id]} · {trust}{protected}", 64)
+            top = 130 + 20 * len(caption.splitlines()) + 16
+            for system in systems[start:start + ENDPOINTS_PER_SIDE]:
+                label = text_lines(system.name or system.id, 62)
+                height = 22 * len(label.splitlines()) + 24
+                page.boxes.append(Box(f"system-{system.id}", label, left + 20, top, 630, height))
+                top += height + 12
+            page.boxes.append(Box(f"zone-{network.id}", caption, left, 108, 680, top - 108,
+                                  "zone", "none", COLORS[3], COLORS[3], True))
+            bottom = max(bottom, top)
+        page.height = bottom + 26
+        pages.append(page)
+    flows = [flow for flow in request.flows if flow.sender_network_id in names
+             and flow.receiver_network_id in names]
+    for offset in range(0, len(flows), ENDPOINTS_PER_SIDE):
+        page = pages[0] if offset == 0 else Page(
+            f"preview-flows-{offset}", "Заявленные обмены",
+        )
+        top = page.height if offset == 0 else 26
+        top += _text(page, "flow-heading", "Заявленные обмены · маршрут не рассчитан",
+                     26, top, 1380, size=17)
+        for flow in flows[offset:offset + ENDPOINTS_PER_SIDE]:
+            source = names[flow.sender_network_id or ""]
+            target = names[flow.receiver_network_id or ""]
+            service: str
+            if isinstance(flow, DataFlow19):
+                service = flow.protocol or "протокол неизвестен"
+                if flow.destination_port is not None:
+                    service += f"/{flow.destination_port}"
+                direction = {"one-way": "→", "two-way": "↔"}.get(flow.mode or "", "·")
+            else:
+                service = "файлы"
+                direction = {"forward": "→", "both": "↔"}.get(flow.direction or "", "·")
+            top += _text(page, f"flow-{flow.id}", f"{source} {direction} {target} · {service}",
+                         26, top, 1380)
+            if not isinstance(flow, DataFlow19):
+                for side in flow.sides:
+                    summary = _check_summary(side.checks)
+                    if summary:
+                        network_name = names[side.network_id]
+                        top += _text(page, f"checks-{flow.id}-{side.network_id}",
+                                     f"{network_name}: {summary}", 40, top, 1360)
+        page.height = top + 26
+        if offset:
+            pages.append(page)
+    return pages
+
+
 def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, object]:
     error = diagram_unavailability19(request, result)
     if error:
         raise ValueError(error)
     placement = result.data.placement
-    assert placement is not None
+    scene = {
+        "schema_version": 1, "design_id": request.id, "background": BACKGROUND,
+        "font_family": "Open Sans", "profile": "calculated-sinoniks-19",
+    }
+    if placement is None:
+        return {**scene, "placement_pending": True, "rule_rows": [],
+                "preview_file_checks": {
+                    rule.id: rule.check_directions() for rule in result.files.rules
+                },
+                "pages": [asdict(page) for page in _unplaced_topology(request)]}
     context = LayoutContext({system.id: system for system in request.systems}, placement)
-    rules = [context.data(rule, number) for number, rule in enumerate(result.data.rules, 1)]
-    rules.extend(context.file(rule, number)
-                 for number, rule in enumerate(result.files.rules, len(rules) + 1))
     networks = {network.id: network.name or network.id for network in request.networks}
+    rules = [context.data(rule, number) for number, rule in enumerate(result.data.rules, 1)]
+    rules.extend(context.file(rule, number, networks)
+                 for number, rule in enumerate(result.files.rules, len(rules) + 1))
     names = (networks[placement.node_a_network_id], networks[placement.node_b_network_id])
     count = (f"Правил Синоникса: {result.minimum}" if result.minimum is not None else
              f"Предварительный расчёт · минимум {result.lower_bound}")
@@ -455,8 +563,7 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
         pages.extend(_topology_pages(request, placement, names, systems=overflow))
     firewall = existing_firewall_details(request)
     return {
-        "schema_version": 1, "design_id": request.id, "background": BACKGROUND,
-        "font_family": "Open Sans", "profile": "calculated-sinoniks-19",
+        **scene,
         "rule_rows": [rule.table_row() for rule in rules],
         "pages": [asdict(page) for page in pages],
         **({"firewall": firewall} if firewall else {}),

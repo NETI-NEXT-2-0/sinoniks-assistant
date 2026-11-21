@@ -122,7 +122,10 @@ def calculate_data_rules(
     request: Requirements19, *, protected_network_id: str | None = None,
 ) -> DataCalculation:
     placement = place_data_exchange(request, protected_network_id)
-    issues = [] if placement else [DataIssue("networks", "protected_side_unresolved")]
+    declared_side = protected_network_id or request.protected_network_id
+    issues = [] if placement else [DataIssue(
+        "networks", "placement_unresolved" if declared_side else "protected_side_unresolved",
+    )]
     if not request.flows:
         issues.append(DataIssue("flows", "flows_unknown"))
     grouped: dict[tuple[object, ...], DataRule] = {}

@@ -1,8 +1,10 @@
 import json
 from copy import deepcopy
+from xml.etree.ElementTree import fromstring
 
 from test_sinoniks_contract19 import data_project, file_project
 
+from partner_agent.project_answers import question_choices
 from partner_agent.project_readiness import readiness_report
 from partner_agent.requirements_result import result_artifacts19
 from partner_agent.sinoniks_contract19 import Requirements19
@@ -34,6 +36,98 @@ def test_unknown_direction_is_a_gap_not_a_conflict():
     report = result["readiness"]
     assert report["status"] == "needs_clarification"
     assert report["missing"] and not report["conflicts"]
+
+
+def test_known_networks_and_flow_are_visible_before_placement():
+    raw = data_project()
+    raw["networks"][0]["trust"] = None
+    raw["protected_network_id"] = "plant"
+    request, result, artifacts = build(raw)
+    assert result["synonyx"] is None and result["firewall"] is None
+    assert result["rules_count"] == 1 and result["confirmed_rules_count"] is None
+    reasons = {issue["reason"] for issue in result["unknowns"]}
+    assert {"placement_unresolved", "network_trust_unknown"} <= reasons
+    assert "protected_side_unresolved" not in reasons
+    scene = json.loads(artifacts["diagram"])
+    assert scene["placement_pending"] and not scene["rule_rows"]
+    page = scene["pages"][0]
+    assert not page["edges"]
+    boxes = {box["id"]: box["text"] for box in page["boxes"]}
+    assert "Доверие неизвестно" in boxes["zone-office"]
+    assert "защищаемая по условиям" in boxes["zone-plant"]
+    assert {"system-sender", "system-receiver"} <= boxes.keys()
+    assert boxes["flow-logs"] == "Цех → Офис · UDP/514"
+    native = fromstring(artifacts["drawio"])
+    assert native.find(".//mxCell[@id='flow-logs']").get("value") == boxes["flow-logs"]
+    assert not readiness_report(request, result, artifacts)["conflicts"]
+
+
+def test_known_file_checks_are_exported_before_placement():
+    raw = file_project()
+    raw["networks"][0]["trust"] = None
+    raw["flows"][0]["sides"][0]["checks"] = [
+        {"kind": "icap", "icap_service": "antivirus"},
+        {"kind": "name_mask"},
+        {"kind": "size"},
+    ]
+    _, result, artifacts = build(raw)
+    assert result["synonyx"] is None
+    rule = json.loads(artifacts["json"])["rules"][0]
+    assert set(rule["checks"]) == {"ICAP: внешний антивирус", "маска имени", "размер"}
+    assert not rule["checks_by_node"]
+    assert all(check in artifacts["txt"] and check in artifacts["drawio"]
+               for check in rule["checks"])
+    preview = fromstring(artifacts["drawio"])
+    assert preview.get("data-placement-pending") == "true"
+    checks = json.loads(preview.attrib["data-preview-file-checks"])
+    assert checks[rule["rule_id"]][0]["checks_by_network"] == (
+        rule["directions"][0]["checks_by_network"]
+    )
+
+
+def test_known_check_parameters_are_requested_without_inventing_a_second_scope():
+    raw = file_project()
+    raw["flows"][0]["sides"][0]["checks"] = [
+        {"kind": "name_mask"}, {"kind": "size"}, {"kind": "icap", "icap_service": "antivirus"},
+    ]
+    raw["flows"][0]["sides"][1]["checks"] = None
+    request, result, artifacts = build(raw)
+    questions = {item["field"]: item for item in question_choices(request)}
+    assert "/flows/0/sides/1/checks" not in questions
+    assert {item["kind"] for field, item in questions.items() if field.endswith("/details")} == {
+        "text",
+    }
+    assert questions["/flows/0/sides/0/checks/0/details"]["side_network_id"] == "plant"
+    assert "/flows/0/sides/0/checks/1/details" in questions
+    assert "Отдельные проверки на этой стороне не заявлены" in artifacts["txt"]
+    assert result["confirmed_rules_count"] is None
+    raw["unknowns"] = [
+        {"path": "/flows/0/sides/1/checks", "reason": "missing", "target_id": "files"},
+    ]
+    explicit_request, _, _ = build(raw)
+    assert any(item["field"] == "/flows/0/sides/1/checks"
+               for item in question_choices(explicit_request))
+
+
+def test_file_checks_are_editable_labels_and_match_native_rule_metadata():
+    raw = file_project()
+    raw["flows"][0]["sides"][0]["checks"] = [
+        {"kind": "name_mask", "details": "*.nc"},
+        {"kind": "size"},
+        {"kind": "icap", "icap_service": "antivirus"},
+    ]
+    request, result, artifacts = build(raw)
+    native = fromstring(artifacts["drawio"])
+    rows = json.loads(native.attrib["data-rule-rows"])
+    directions = result["rules"][0]["directions"]
+    assert [direction["checks_by_network"] for direction in rows[0]["file_check_directions"]] == [
+        direction["checks_by_network"] for direction in directions
+    ]
+    labels = "\n".join(cell.get("value", "") for cell in native.findall(".//mxCell"))
+    assert "маска имени (*.nc)" in labels
+    assert "размер (параметр не задан)" in labels
+    assert "ICAP: внешний антивирус" in labels
+    assert not readiness_report(request, result, artifacts)["conflicts"]
 
 
 def test_explicit_unknown_and_optional_port_remain_preliminary_not_a_fake_failure():

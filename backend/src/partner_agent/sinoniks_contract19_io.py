@@ -110,6 +110,7 @@ class Assessment19(StrictModel):
 def assess(request: Requirements19) -> Assessment19:
     issues: list[ContractIssue19] = []
     unknown = {note.path for note in request.unknowns if note.reason == "user_unknown"}
+    documented_gaps = {note.path for note in request.unknowns}
 
     def issue(path: str, message: str, kind: Literal[
         "missing", "conflict", "unsupported", "optional",
@@ -131,9 +132,10 @@ def assess(request: Requirements19) -> Assessment19:
         issue("/protected_network_id", "Выбор стороны противоречит закрытой сети. Уточните его.",
               "conflict")
     for index, network in enumerate(request.networks):
-        for field in ("name", "trust"):
-            if getattr(network, field) is None:
-                issue(f"/networks/{index}/{field}", "Уточните название и доверие сети.")
+        if network.name is None:
+            issue(f"/networks/{index}/name", "Уточните название сети.")
+        if network.trust is None:
+            issue(f"/networks/{index}/trust", "Уточните доверие сети.")
     for index, system in enumerate(request.systems):
         if system.kind != "usb" and system.network_id is None:
             issue(f"/systems/{index}/network_id", "К какой сети относится система?")
@@ -184,8 +186,11 @@ def assess(request: Requirements19) -> Assessment19:
                 path = root + f"/sides/{side_index}"
                 if side.manual is None and side.usb is None and not side.automations:
                     issue(path + "/manual", "Как файлы попадают на узел и забираются с него?")
-                if side.checks is None:
-                    issue(path + "/checks", "Уточните проверки файлов на этой стороне.")
+                checks_path = path + "/checks"
+                if side.checks is None and (
+                    checks_path in documented_gaps or not flow.has_declared_checks()
+                ):
+                    issue(checks_path, "Уточните проверки файлов на этой стороне.")
                 receives_files = (
                     flow.direction != "forward" or side.network_id != flow.sender_network_id
                 )
@@ -198,8 +203,14 @@ def assess(request: Requirements19) -> Assessment19:
                             issue(path + f"/automations/{n}/{field}",
                                   "Уточните протокол и хранилище автоматической передачи.")
                 for check_index, check in enumerate(side.checks or []):
+                    check_path = checks_path + f"/{check_index}"
+                    if check.details is None and check.kind in ("name_mask", "size"):
+                        question = ("Какую маску имени файла использовать?"
+                                    if check.kind == "name_mask"
+                                    else "Какое ограничение по размеру файла использовать?")
+                        issue(check_path + "/details", question)
                     if check.kind == "unsupported":
-                        issue(path + f"/checks/{check_index}",
+                        issue(check_path,
                               "Эта проверка — пожелание вендору, а не функция продукта.",
                               "unsupported")
     if request.manual_users is None and has_unidentified_manual_users(

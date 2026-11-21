@@ -12,6 +12,7 @@ from partner_agent.sinoniks_result_export import FILE_ISSUE_LABELS, result_docum
 
 ISSUE_LABELS = {
     "protected_side_unresolved": "Не определена защищаемая сторона",
+    "placement_unresolved": "Не определено размещение оборудования",
     "flows_unknown": "Не описаны потоки",
     "network_direction_unknown": "Не указано направление обмена",
     "systems_unknown": "Не указаны системы отправления или получения",
@@ -52,7 +53,10 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
                 f"«{request.existing_firewall_name}»."
             )
     else:
-        lines.append("Размещение пока не определено: уточните две сети и защищаемую сторону.")
+        lines.append("Размещение пока не определено. Проверьте условия сетей.")
+        if request.protected_network_id is not None:
+            protected_name = networks[request.protected_network_id]
+            lines.append(f"Защищаемая сторона по условиям: {protected_name}.")
     if result.get("capacity_exceeded"):
         lines.append("Одного ПАК недостаточно: нижняя оценка превышает 256 правил.")
     confirmed = result.get("confirmed_rules_count")
@@ -97,7 +101,10 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
         for issue in rule.get("provisional_reasons", []):
             network = networks.get(issue["network_id"])
             scope = f" ({network})" if network else ""
-            lines.append(f"   Требует уточнения: {issue['label']}{scope}.")
+            label = issue["label"]
+            if issue["reason"] != "file_check_scope_unconfirmed":
+                label = f"Требует уточнения: {label}"
+            lines.append(f"   {label}{scope}.")
     if any(system.kind == "usb" for system in request.systems) or any(
         flow.kind == "file" and any(side.usb is True for side in flow.sides)
         for flow in request.flows

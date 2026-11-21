@@ -30,6 +30,11 @@ SOLVER_CONFLICTS = {
 }
 
 
+def _file_check_directions(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = ("from_network_id", "to_network_id", "checks_by_network")
+    return [{key: direction[key] for key in fields} for direction in rule["directions"]]
+
+
 def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> list[dict[str, Any]]:
     """Check semantic identities, not presentation coordinates or key ordering."""
     try:
@@ -50,8 +55,18 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
             scene = json.loads(artifacts["diagram"])
             rows = scene["rule_rows"]
             root = fromstring(artifacts["drawio"])
+            placement_pending = scene.get("placement_pending") is True
+            if placement_pending and result.get("synonyx") is not None:
+                raise ValueError("preview conflicts with placement")
+            if placement_pending:
+                preview_checks = {rule["rule_id"]: _file_check_directions(rule)
+                                  for rule in expected if rule["type"] == "file"}
+                if (scene["preview_file_checks"] != preview_checks
+                        or json.loads(root.attrib["data-preview-file-checks"]) != preview_checks):
+                    raise ValueError("preview file checks mismatch")
+            diagram_rules = [] if placement_pending else expected
             if (root.tag != "mxfile" or rows != json.loads(root.attrib["data-rule-rows"])
-                    or len(rows) != len(expected)):
+                    or len(rows) != len(diagram_rules)):
                 raise ValueError("diagram mismatch")
             if not scene["pages"]:
                 raise ValueError("missing pages")
@@ -61,6 +76,8 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                 equipment = {FIREWALL_ID, "node-A", "core", "node-B"}
                 if result.get("synonyx") and not equipment <= boxes:
                     raise ValueError("missing equipment")
+                if placement_pending and (equipment & boxes or page["edges"]):
+                    raise ValueError("equipment or links in unplaced preview")
                 diagram = next((node for node in root.findall("diagram")
                                 if node.get("id") == page["id"]), None)
                 if diagram is None:
@@ -77,9 +94,9 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                     if (cell is None or cell.get("source") != edge["source"]
                             or cell.get("target") != edge["target"]):
                         raise ValueError("native link mismatch")
-            if seen_rule_ids != {rule["rule_id"] for rule in expected}:
+            if seen_rule_ids != {rule["rule_id"] for rule in diagram_rules}:
                 raise ValueError("missing or invented rule edges")
-            for row, rule in zip(rows, expected, strict=True):
+            for row, rule in zip(rows, diagram_rules, strict=True):
                 if any((row["number"] != rule["id"], row["id"] != rule["rule_id"],
                         row["from_network_id"] != rule["from"],
                         row["to_network_id"] != rule["to"],
@@ -89,6 +106,9 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                     row["protocol"] != rule["protocol"] or row["destination_port"] != rule["port"]
                 ):
                     raise ValueError("protocol mismatch")
+                if rule["type"] == "file":
+                    if row.get("file_check_directions") != _file_check_directions(rule):
+                        raise ValueError("file checks mismatch")
         return []
     except (ValueError, TypeError, KeyError, ParseError):
         return [{"code": "artifact_mismatch", "path": None, "subject": "Выгрузки",
