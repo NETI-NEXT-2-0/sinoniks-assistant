@@ -81,13 +81,19 @@ export interface RequirementsInput {
 export interface CalculatedResult19 {
   schema_version: '1.1'; status: 'needs_clarification' | 'preliminary' | 'completed' | 'unsupported';
   explanation: string; rules_count: number; rules_lower_bound: number; confirmed_rules_count: number | null;
+  rules_lower_bound_breakdown?: { data: number; file: number };
   file_users_count: number | null; file_users_range: { min: number; max: number | null } | null;
+  file_users_breakdown?: {
+    manual: { min: number; max: number | null; actors: { id: string; name: string | null }[] };
+    technical_pull_count: number;
+  };
   networks: { id: string; name: string | null; trust: string | null }[];
   devices: { id: string; name: string | null; network_id: string | null }[];
   synonyx: { node_a_network_id: string; node_b_network_id: string } | null;
   rules: { id: number; rule_id: string; type: 'data' | 'file'; from: string; to: string;
     description: string; mode: string; protocol: string | Record<string, string | null> | null;
     port: number | null; checks?: string[];
+    provisional_reasons?: { flow_id: string; network_id: string | null; reason: string; label: string }[];
     directions?: { access_groups?: Record<string, string | null> }[] }[];
 }
 export interface RequirementsRevision {
