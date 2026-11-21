@@ -41,14 +41,16 @@ with sync_playwright() as session:
         choices.get_by_role("textbox", name="Свой ответ", exact=True).fill(original)
         with page.expect_response(lambda response: response.request.method == "POST"
                                   and response.url.endswith("/runs")) as submitted:
-            choices.get_by_role("button", name="Отправить свой ответ", exact=True).click()
+            choices.get_by_role("button", name="Применить ответы (1)", exact=True).click()
         assert submitted.value.status == 202
-        assert submitted.value.request.post_data_json["vendor_wish"]["text"] == original
-        assert submitted.value.json()["vendor_wish"]["text"] == original
+        command = submitted.value.request.post_data_json["project_answer"]
+        assert command["remarks"][0]["text"] == original
+        assert submitted.value.json()["project_answer_remarks"][0]["text"] == original
         payload = page.request.get(base + "/vendor-wishes/export").json()
         assert payload["wishes"][0]["text"] == original
         assert payload["wishes"][0]["origin"] == "user_submission"
         expect(page.get_by_text("Готово", exact=True)).to_have_count(2, timeout=30000)
+        page.get_by_role("button", name="Пожелания и отзывы", exact=True).click()
         page.get_by_text("Пожелания вендору", exact=True).click()
         with page.expect_download() as download:
             page.get_by_role("button", name="Скачать пожелания JSON", exact=True).click()
@@ -57,11 +59,11 @@ with sync_playwright() as session:
         page.reload()
         expect(page.locator("button.new-chat")).to_be_enabled(timeout=20000)
         assert page.request.get(base + "/vendor-wishes/export").json() == payload
-        assert page.request.get(base + "/accounting").json()["summary"]["calls_count"] == 2
+        assert page.request.get(base + "/accounting").json()["summary"]["calls_count"] == 1
     finally:
         token = page.request.get(ORIGIN + "/api/v1/auth/csrf").json()["csrf_token"]
         assert page.request.delete(base, headers={
             "Origin": ORIGIN, "X-CSRF-Token": token,
         }).status == 204
         browser.close()
-print("Other text saved before model output, owner JSON/download/reload and call count verified")
+print("Other text saved with zero extra provider calls; owner JSON, download and reload verified")
