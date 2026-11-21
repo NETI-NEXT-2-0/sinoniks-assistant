@@ -24,18 +24,43 @@ from partner_agent.sinoniks_contract19 import Requirements19
 RAG_RESPONSE_MAX_CHARS = 128000
 
 
+REQUIREMENTS19_RULE_CODES = frozenset({
+    "duplicate_global_identifier",
+    "unknown_reference",
+    "duplicate_reference",
+    "flow_not_crossing_boundary",
+    "usb_stream_endpoint",
+    "endpoint_network_mismatch",
+    "manual_actor_without_transfer",
+    "manual_protocol_disabled",
+    "automation_storage_mismatch",
+    "manual_users_under_count",
+    "duplicate_unknown_path",
+    "note_target_mismatch",
+    "root_note_target",
+    "unknown_note_conflict",
+})
+
+
 def safe_validation_diagnostics(error: ValidationError) -> dict[str, Any]:
     """Report schema paths/types only, never model-generated values or messages."""
     items: list[dict[str, Any]] = []
-    for issue in error.errors(include_input=False, include_context=False, include_url=False)[:20]:
-        location = issue.get("loc", ())
+    for issue in error.errors(include_input=False, include_context=True, include_url=False)[:100]:
+        context = issue.get("ctx") or {}
+        path_hint = context.get("path") if isinstance(context, dict) else None
+        location = path_hint if isinstance(path_hint, list) else issue.get("loc", ())
         path = [part if isinstance(part, int) else part[:64]
                 for part in location if isinstance(part, int)
                 or (isinstance(part, str) and part.isidentifier())]
-        items.append({"path": path[:12], "type": str(issue.get("type", "unknown"))[:64]})
+        error_type = str(issue.get("type", "unknown"))[:64]
+        item: dict[str, Any] = {"path": path[:24], "type": error_type,
+                                "message": str(issue.get("msg", "Validation failed"))[:1000]}
+        if error_type in REQUIREMENTS19_RULE_CODES:
+            item["rule"] = error_type
+            item["validator"] = "Requirements19.references"
+        items.append(item)
     return {"stage": "design_validation", "issues": items,
             "issue_count": error.error_count()}
-
 
 def decode_model_json(text: str) -> dict[str, Any]:
     """Reject ambiguous/unpersistable responses before validating their meaning."""
@@ -221,6 +246,15 @@ def prepare_request(
             "project assumption, not a change of trust. A root unknown uses target_id=null. "
             "For mixed supported/unsupported requests, preserve supported flows in the design "
             "and record the unsupported request in requests_for_vendor; do not discard valid work. "
+            "Saving a project, calculating rules, drawing its diagram and exporting draw.io or "
+            "expert JSON are supported APPLICATION actions, not unsupported device features. "
+            "Do not add them to requests_for_vendor or vendor_wishes. "
+            "Every id, reference and access_group is a technical identifier: 1-80 ASCII "
+            "letters, digits, underscores or hyphens only (^[a-zA-Z0-9_-]{1,80}$). "
+            "Human-readable names and explanations may be in the user's language. For example, "
+            "use access_group=shared_documents, laboratory_group or service_group, never a "
+            "display label with spaces. Reuse the same group identifier for the same access "
+            "scope and distinct identifiers for isolated groups; preserve existing group IDs. "
             "Networks: {id,name:null|string,trust:null|'open'|'closed'}. Systems: "
             "{id,name,network_id,kind:'system'|'storage'|'usb',attachment:null|'node-A'}. "
             "USB has network_id=null and attachment=node-A; no data stream may use USB. "
@@ -248,6 +282,13 @@ def prepare_request(
             "For an explicit 'I do not know', leave the field null/empty and add user_unknown "
             "with its JSON Pointer path and owning entity target_id. Keep unanswered missing "
             "distinct from user_unknown. Remove an old unknown note when that field is supplied. "
+            "An unknown path must resolve to null or an empty array, never to a supplied "
+            "value or a populated collection. Missing IP addresses do NOT make /systems "
+            "unknown when named systems exist. IP addresses and ICAP service URLs are not "
+            "fields of this contract: preserve those deployment gaps in assumptions with "
+            "an existing path and matching target_id, not invented fields or unknown notes "
+            "on populated systems/checks. For example, an IP deployment assumption may use "
+            "path=/systems and target_id=null while unknowns remains []. "
             "Update note paths if entity order changes, preserving target IDs. Do not infer trust "
             "from network names or old firewall positions. Do not compute a rule count, topology "
             "or XML. v3 is requirements only; the server computes architecture after validation. "
@@ -277,7 +318,11 @@ def prepare_request(
             "Never return conversation/grounded in this mode or fabricate conditions to comply."
         )
     instruction += (
-        " Optional vendor_wishes: at most 5 {kind,text} objects in every request mode. "
+        " The response envelope has answer, citations, mode, design and optional vendor_wishes. "
+        "vendor_wishes belongs ONLY at the response root, alongside design, NEVER inside design. "
+        "For v3, design.requests_for_vendor is the separate typed project list with id/text/"
+        "kind/flow_id; do not copy envelope fields into it or add undeclared project fields. "
+        "Optional vendor_wishes: at most 5 {kind,text} objects in every request mode. "
         "Use kind=unsupported for explicit requests for unsupported features, kind=free_text "
         "for text answering Other. Copy a complete verbatim excerpt from the current request "
         "(max 500 chars). Exclude availability questions. Wishes do not change project "
@@ -470,10 +515,18 @@ async def answer_with_provider(
         code = (exc.code if isinstance(exc, ProviderError) else
                 "provider_invalid_design" if isinstance(exc, ValidationError)
                 else "provider_invalid_rag_json")
-        diagnostics = (safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)
+        diagnostics: dict[str, Any] = (
+            safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)
                        else {"stage": "design_validation", "reason": "design_object_missing"}
                        if code == "provider_invalid_design" else
                        {"stage": "provider_response_validation", "reason": code})
+        if settings.developer_diagnostics_enabled and settings.environment != "production":
+            # Full parsed model output for opted-in local debugging only.
+            # Provider headers and credentials are never included.
+            if isinstance(locals().get("decoded"), dict):
+                diagnostics["model_response"] = decoded
+            elif isinstance(locals().get("text"), str):
+                diagnostics["model_response_text"] = text[:32000]
         raise ProviderError(code, usage=normalize_usage(body.get("usage")),
                             diagnostics=diagnostics) from exc
     by_id = {item["evidence_id"]: item for item in evidence}

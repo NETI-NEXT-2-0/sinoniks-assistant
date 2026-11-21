@@ -373,3 +373,54 @@ def test_developer_diagnostics_defaults_off_and_rejects_production():
         Settings(database_url="postgresql+psycopg://u:p@localhost/db",
                  environment="production", public_origin="https://example.com",
                  developer_diagnostics_enabled=True)
+
+@pytest.mark.parametrize(("mutation", "expected_rule"), [
+    (lambda d: d["systems"][0].update(id="office"), "duplicate_global_identifier"),
+    (lambda d: d["flows"][0].update(receiver_ids=["missing-system"]), "unknown_reference"),
+    (lambda d: d["flows"][0].update(receiver_network_id="plant"), "flow_not_crossing_boundary"),
+])
+def test_root_design_validation_includes_precise_safe_rule(mutation, expected_rule):
+    from pydantic import ValidationError
+
+    from partner_agent.runtime.rag_provider import safe_validation_diagnostics
+    from partner_agent.sinoniks_contract19 import Requirements19
+
+    document = {
+        "schema_version": 3, "id": "project",
+        "networks": [{"id": "office"}, {"id": "plant"}],
+        "systems": [{"id": "sender", "network_id": "plant"},
+                    {"id": "receiver", "network_id": "office"}],
+        "flows": [{"id": "logs", "kind": "data", "sender_network_id": "plant",
+                   "receiver_network_id": "office", "sender_ids": ["sender"],
+                   "receiver_ids": ["receiver"], "purpose": "Logs", "mode": "one-way",
+                   "protocol": "UDP", "destination_port": 514}],
+    }
+    mutation(document)
+    with pytest.raises(ValidationError) as caught:
+        Requirements19.model_validate(document)
+    diagnostics = safe_validation_diagnostics(caught.value)
+    assert diagnostics["issues"][0]["path"] == []
+    assert diagnostics["issues"][0]["type"] == expected_rule
+    assert diagnostics["issues"][0]["rule"] == expected_rule
+    assert diagnostics["issues"][0]["validator"] == "Requirements19.references"
+    assert diagnostics["issues"][0]["message"]
+    assert "model_response" not in diagnostics
+
+@pytest.mark.asyncio
+async def test_full_developer_diagnostics_include_validation_reason_and_design(monkeypatch):
+    raw = {"answer": "Draft", "citations": [], "mode": "design",
+           "design": {"id": "draft", "networks": [{"id": "plant"}],
+                      "systems": [{"id": "sender", "network_id": "unknown-network"}]}}
+    async def model(settings, messages):
+        return {"choices": [{"message": {"content": json.dumps(raw)}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 50, "total_tokens": 70}}
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db",
+                        developer_diagnostics_enabled=True)
+    with pytest.raises(ProviderError) as caught:
+        await answer_with_provider(settings, "Design", [], request_mode="design",
+                                   design_context={"schema_version": 3, "id": "draft"})
+    diagnostics = caught.value.diagnostics
+    assert diagnostics["model_response"] == raw
+    assert diagnostics["issues"][0]["rule"] == "unknown_reference"
+    assert "unknown-network" in diagnostics["issues"][0]["message"]

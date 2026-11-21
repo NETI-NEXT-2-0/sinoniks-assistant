@@ -69,15 +69,49 @@ function runFailure(run: Run): string {
   return 'Выполнение завершилось технической ошибкой. Ответ не подтверждён.';
 }
 
-function DeveloperDiagnostics({ run }: { run: Run }) {
+function DeveloperDiagnostics({ run, chatId, prompt }: { run: Run; chatId: string | null; prompt: Message | undefined }) {
   const outcome = isRecord(run.outcome) ? run.outcome : null;
   const diagnostic = isRecord(outcome?.developer_diagnostics) ? outcome.developer_diagnostics : null;
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   if (!diagnostic) return null;
-  // Server supplies only allowlisted schema locations/types, never provider payloads.
-  const report = JSON.stringify({ error_code: outcome?.code, ...diagnostic }, null, 2);
-  return <details className="run-developer-diagnostics"><summary>Диагностика разработчика</summary>
-    <pre>{report}</pre><button type="button" onClick={() => { void navigator.clipboard.writeText(report); }}>Скопировать диагностику</button>
-  </details>;
+
+  // One self-contained export; the full developer-mode outcome may contain project details.
+  const report = JSON.stringify({
+    format: 'sinoniks-developer-report',
+    version: 1,
+    app: 'sinoniks-assistant',
+    chat_id: chatId,
+    run_id: run.id,
+    branch_id: run.branch_id,
+    input_message_id: run.input_message_id,
+    user_message: prompt ? { id: prompt.id, text: prompt.content, created_at: prompt.created_at } : null,
+    request_mode: run.request_mode,
+    run_status: run.status,
+    runtime_profile: run.runtime_profile ?? null,
+    error_code: outcome?.code ?? null,
+    error_summary: runFailure(run),
+    diagnostics: diagnostic,
+    outcome,
+  }, null, 2);
+
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+    }
+  };
+  return <div className="run-developer-tools">
+    <button type="button" className="developer-copy-report" onClick={() => { void copyReport(); }}>
+      {copyState === 'copied' ? 'Отчёт скопирован' : 'Скопировать полный debug-отчёт'}
+    </button>
+    {copyState === 'error' && <span role="alert">Не удалось скопировать. Откройте отчёт и скопируйте текст вручную.</span>}
+    <details className="run-developer-diagnostics">
+      <summary>Полный отчёт разработчика</summary>
+      <pre>{report}</pre>
+    </details>
+  </div>;
 }
 
 function RunState({ run }: { run: Run }) {
@@ -242,7 +276,7 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
     return <div className="run-detail" key={run.id}>
       <RunState run={run} />
       {!terminal(run.status) && <button className="run-stop" aria-label={`Остановить выполнение ${run.queue_seq}`} onClick={() => { void space.cancel(run.id); }}><Icon name="stop" />Стоп</button>}
-      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p><DeveloperDiagnostics run={run} /></>}
+      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p><DeveloperDiagnostics run={run} chatId={value?.chat.id ?? null} prompt={value?.messages.find(message => message.id === run.input_message_id)} /></>}
       {run.status === 'cancelled' && <p className="run-explanation">Выполнение остановлено. Полученный фрагмент сохранён.</p>}
       {run.status === 'waiting_input' && <div className="clarification">
         <p>{run.clarification_question ?? 'Уточните запрос, чтобы продолжить.'}</p>

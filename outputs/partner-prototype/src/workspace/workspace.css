@@ -145,3 +145,10 @@
 .chat-layout .chat-input-row { padding: 0; }
 .chat-layout .chat-input-row textarea { min-height: 24px; line-height: 24px; padding: 0 4px; }
 .chat-layout .chat-input-row .send { margin: 0; width: 36px; height: 36px; }
+
+/* Opt-in developer diagnostics: a one-click complete report and an expandable preview. */
+.run-developer-tools{display:grid;gap:8px;margin-top:10px;min-width:0}
+.developer-copy-report{justify-self:start;padding:7px 12px;border:1px solid var(--stroke);border-radius:7px;font-size:13px;font-weight:600}
+.run-developer-diagnostics{min-width:0}
+.run-developer-diagnostics summary{cursor:pointer;font-size:13px}
+.run-developer-diagnostics pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:380px;overflow:auto;padding:12px;border:1px solid var(--stroke);border-radius:7px;font-size:12px;line-height:1.5}
