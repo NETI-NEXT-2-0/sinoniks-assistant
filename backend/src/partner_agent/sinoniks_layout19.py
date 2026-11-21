@@ -248,7 +248,8 @@ def _page(
             (usb if endpoint.usb else regular)[endpoint].append(rule.number)
     cards, card_bottom = _endpoints(page, regular)
     centre = max(246, card_bottom // 2 + 72)
-    usb_top = centre + 152
+    usb_rules = [number for number, arms in branches.items() if any(item.usb for item in arms)]
+    usb_top = centre + 152 + max(0, len(usb_rules) - 1) * 36
     bottom = max(card_bottom + 28, usb_top + (92 if usb else 0) + 24)
     equipment = _equipment(page, centre, len(rules), bottom, names)
     _text(page, "title", "Синоникс 1.9 · " + page.title, 26, 12, 1380,
@@ -280,9 +281,13 @@ def _page(
                 points.reverse()
             page.edges.append(Edge(
                 f"{rule.id}-usb", node.id if receives else usb_box.id,
-                usb_box.id if receives else node.id, points, color, rule.id, "none",
-                "block" if receives else "none",
+                usb_box.id if receives else node.id, points, color, rule.id,
+                "open" if rule.two_way else "none", "block",
             ))
+            _text(page, f"{rule.id}-label-usb", f"{rule.number} · файлы, USB",
+                  node.x + 35 + (len(rules) - 1) * 16,
+                  node.y + node.height + 18 + usb_rules.index(rule.number) * 36,
+                  170, color=color, size=10)
         for index, (endpoint, received) in enumerate(branches[rule.number].items()):
             if endpoint.usb:
                 continue
@@ -311,11 +316,19 @@ def _page(
     top += _text(page, "count", count_text, 26, top, 1360, color="#FFFFFF", size=16)
     for rule in rules:
         direction = "двунаправленное" if rule.two_way else "однонаправленное"
-        text = f"{rule.number}. {rule.service} · {direction} · {rule.label}"
+        senders = ", ".join(endpoint.label for endpoint in (rule.primary_senders or rule.senders))
+        receivers = ", ".join(endpoint.label for endpoint in (
+            rule.primary_receivers or rule.receivers
+        ))
+        arrow = "↔" if rule.two_way else "→"
+        text = (f"{rule.number}. {senders} {arrow} {receivers}: {rule.service} · "
+                f"{rule.label} · {direction}")
         if rule.provisional:
             text += " · предварительно"
-        top += _text(page, f"rule-{rule.number}", text, 26, top + 6, 1360,
-                     color=COLORS[(rule.number - 1) % len(COLORS)]) + 6
+        page.boxes.append(Box(f"rule-marker-{rule.number}", "", 26, top + 22, 12, 12,
+                              "detail", COLORS[(rule.number - 1) % len(COLORS)], radius=2))
+        top += _text(page, f"rule-{rule.number}", text, 48, top + 6, 1338,
+                     color="#FFFFFF") + 6
     top += _text(page, "placement", "МЭ на границе. Узел А обращён наружу, Узел В — к "
                  "защищаемой сети. Пунктир обозначает изолированный перенос через Ядро.",
                  26, top + 14, 1360)
@@ -346,7 +359,7 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
                  for number, rule in enumerate(result.files.rules, len(rules) + 1))
     networks = {network.id: network.name or network.id for network in request.networks}
     names = (networks[placement.node_a_network_id], networks[placement.node_b_network_id])
-    count = (f"Логических правил: {result.minimum}" if result.minimum is not None else
+    count = (f"Правил Синоникса: {result.minimum}" if result.minimum is not None else
              f"Предварительный расчёт · минимум {result.lower_bound}")
     pages = [_page(rules[start:start + RULES_PER_PAGE], names, count)
              for start in range(0, len(rules), RULES_PER_PAGE)]

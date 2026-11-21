@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -141,16 +142,27 @@ def connections(root: Element) -> dict[str, tuple[str | None, str | None]]:
     }
 
 
+def edge_styles(root: Element) -> dict[str, dict[str, str | None]]:
+    result = {}
+    for edge in root.findall(".//mxCell[@edge='1']"):
+        style = dict(part.split("=", 1) for part in edge.attrib["style"].split(";") if "=" in part)
+        result[edge.attrib["id"]] = {key: style.get(key) for key in (
+            "strokeColor", "startArrow", "endArrow",
+        )}
+    return result
+
+
 def check_exports(original: str, saved: str, reopened: str) -> None:
     initial, edited, resaved = (fromstring(xml) for xml in (original, saved, reopened))
     start_cell = initial.find(f".//mxCell[@value='{INITIAL_NAME}']")
-    usb = initial.find(".//mxCell[@value='Тестовый USB']")
-    assert start_cell is not None and usb is not None, "Synthetic systems missing from export"
+    assert start_cell is not None, "Editable system missing from export"
     cell_path = f".//mxCell[@id='{start_cell.attrib['id']}']"
     rules = json.loads(initial.attrib["data-rule-rows"])
-    assert len(rules) == 3, "Expected two data rows and one USB file row"
+    assert len(rules) == 3, "Expected three acceptance rule rows"
     links = connections(initial)
-    assert (usb.attrib["id"], "node-A") in links.values(), "USB must connect directly to node A"
+    for edge in initial.findall(".//mxCell[@edge='1']"):
+        if edge.attrib["id"].endswith("-usb"):
+            assert {edge.get("source"), edge.get("target")} == {"usb-1", "node-A"}
     edit_position = None
     for root in (edited, resaved):
         cell = root.find(cell_path)
@@ -161,18 +173,21 @@ def check_exports(original: str, saved: str, reopened: str) -> None:
         edit_position = current
         assert json.loads(root.attrib["data-rule-rows"]) == rules, "Rule rows changed"
         assert connections(root) == links, "Edge endpoints changed"
+        assert edge_styles(root) == edge_styles(initial), "Rule colors or directions changed"
 
 
-def roundtrip(origin: str, channel: str | None) -> None:
+def roundtrip(origin: str, channel: str | None, original: str) -> None:
     def route_local(route: Route) -> None:
         if route.request.url.startswith(origin + "/"):
             route.continue_()
         else:
             route.abort()
 
-    original = synthetic_export()
     with sync_playwright() as driver:
-        browser = driver.chromium.launch(channel=channel)
+        browser = driver.chromium.launch(channel=channel, **(
+            {"executable_path": os.environ["CHROMIUM_PATH"]}
+            if os.environ.get("CHROMIUM_PATH") else {}
+        ))
         context = browser.new_context(viewport={"width": 1440, "height": 1000},
                                       service_workers="block")
         context.route("**/*", route_local)
@@ -185,7 +200,6 @@ def roundtrip(origin: str, channel: str | None) -> None:
         open_editor(reopened, origin, saved)
         frame = reopened.frame_locator("#editor")
         expect(frame.get_by_text(EDITED_NAME, exact=True)).to_be_visible()
-        expect(frame.get_by_text("Тестовый USB", exact=True)).to_be_visible()
         check_exports(original, saved, save_editor(reopened))
         browser.close()
 
@@ -194,6 +208,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("editor_dir", type=Path)
     parser.add_argument("--channel", help="Installed Chromium channel, for example msedge")
+    parser.add_argument("--input", type=Path, help="Downloaded three-rule acceptance export")
     options = parser.parse_args()
     if not (options.editor_dir / "index.html").is_file():
         parser.error("editor_dir must point to the draw.io webapp directory")
@@ -203,7 +218,9 @@ def main() -> None:
         worker = Thread(target=server.serve_forever)
         worker.start()
         try:
-            roundtrip(f"http://127.0.0.1:{server.server_port}", options.channel)
+            original = (options.input.read_text(encoding="utf-8") if options.input
+                        else synthetic_export())
+            roundtrip(f"http://127.0.0.1:{server.server_port}", options.channel, original)
         finally:
             server.shutdown()
             worker.join()
