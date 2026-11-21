@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from partner_agent.infra.settings import Settings
-from partner_agent.runtime.provider import ProviderError, chat_completion
+from partner_agent.runtime.provider import ProviderError, chat_completion, stream_completion
 
 
 class Chunks(httpx.AsyncByteStream):
@@ -67,6 +67,7 @@ async def test_valid_bounded_wire_formats_and_common_compression(encoding, wire)
     def check(request):
         sent = json.loads(request.content)
         assert sent["stream"] is False
+        assert "provider" not in sent
         assert request.headers["accept-encoding"] == "identity, gzip, deflate"
         assert request.url.path == (
             "/v1/responses" if wire == "responses" else "/v1/chat/completions"
@@ -82,6 +83,42 @@ async def test_valid_bounded_wire_formats_and_common_compression(encoding, wire)
         ),
     )
     assert result == payload and stream.closed
+
+
+@pytest.mark.parametrize("wire,limit", [("chat_completions", "max_tokens"),
+                                       ("responses", "max_output_tokens")])
+async def test_contest_request_pins_the_declared_router_variant(wire, limit):
+    from partner_agent.infra.settings import ROUTER_ENDPOINT
+
+    model = "publisher/model"
+    config = settings(model_wire_api=wire).model_dump()
+    config.update(
+        model_endpoint=ROUTER_ENDPOINT, model_name=model, model_catalog_id=model,
+        model_provider_variant="synthetic/fp8", model_price_snapshot="synthetic-snapshot",
+        model_contest_mode=True, model_input_usd_per_million=0.09,
+        model_output_usd_per_million=0.30,
+    )
+    contest = Settings(_env_file=None, **config)
+
+    def check(request):
+        sent = json.loads(request.content)
+        assert sent["model"] == model and sent[limit] == contest.model_max_output_tokens
+        assert sent["provider"] == {
+            "order": ["synthetic/fp8"], "only": ["synthetic/fp8"], "allow_fallbacks": False,
+            "max_price": {"prompt": 0.09, "completion": 0.30, "request": 0},
+        }
+
+    await chat_completion(
+        contest, [], client_factory=factory(Chunks([b'{"choices":[]}']), request_check=check),
+    )
+    with pytest.raises(ValidationError, match="exact declared catalog model"):
+        Settings(_env_file=None, **(config | {"model_name": "publisher/other"}))
+    with pytest.raises(ValidationError, match="provider endpoint slug"):
+        Settings(_env_file=None, **(config | {"model_provider_variant": "Provider Name"}))
+    with pytest.raises(ValidationError, match="direct HTTPS router endpoint"):
+        Settings(_env_file=None, **(config | {"model_endpoint": "http://openrouter.ai/api/v1"}))
+    with pytest.raises(ProviderError, match="provider_contest_requires_metered_completion"):
+        await anext(stream_completion(contest, [], client_factory=factory(Chunks([]))))
 
 
 async def test_exact_body_limit_succeeds_and_one_more_byte_fails(monkeypatch):
