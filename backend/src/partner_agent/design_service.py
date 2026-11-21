@@ -47,6 +47,10 @@ def project_readout(project: DesignRevision) -> dict[str, Any]:
             if left in networks and right in networks and left != right:
                 displayed = {"left": networks[left], "right": networks[right]}
         return {"revision": project.revision,
+                **({"readiness": {key: result["readiness"][key] for key in ("status", "title")}
+                   | {"counts": {key: len(result["readiness"][key]) for key in
+                                 ("missing", "conflicts", "limitations", "recommendations")}}}
+                   if result and isinstance(result.get("readiness"), dict) else {}),
                 "displayed_networks": displayed,
                 "requirements_status": revision_status(project),
                 "has_architecture": bool(result and result.get("synonyx")),

@@ -47,6 +47,7 @@ class Claim:
     remaining_seconds: float
     user_id: UUID
     project_answer: dict[str, Any] | None = None
+    interpret_project_answer: bool = False
 
 
 async def claim_run(
@@ -157,7 +158,8 @@ async def claim_run(
         await assert_ownership(db, run, ownership)
         await db.commit()
         return Claim(ownership, message.id, graph_input, remaining, run.user_id,
-                     (run.outcome or {}).get("project_answer"))
+                     (run.outcome or {}).get("project_answer"),
+                     bool((run.outcome or {}).get("interpret_project_answer")))
 
 
 async def heartbeat(ownership: Ownership) -> None:
@@ -242,6 +244,8 @@ async def complete(
                        "design_has_result": row.result is not None,
                        "design_has_questions": bool(row.questions)
                        and row.input.get("schema_version") == 3}
+            if row.result and "readiness" in row.result:
+                outcome = {**outcome, "design_readiness": row.result["readiness"]}
             if row.input.get("schema_version") == 3:
                 text = (str(row.result["explanation"]) if row.result else
                         requirements_answer(Requirements19.model_validate(row.input)))

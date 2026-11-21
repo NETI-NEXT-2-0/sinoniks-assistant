@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, type AuthClient } from "../api/client";
 import type { RequirementsRevision } from "../api/requirements";
 import { DiagramViewer } from "./DiagramViewer";
+import { ProjectReadiness } from "./ProjectReadiness";
 
 function countRange({ min, max }: { min: number; max: number | null }): string {
   if (max === min) return String(min);
@@ -53,6 +54,7 @@ export function CalculatedProject({
   }
   return (
     <section className="design-result calculated-project" aria-label="Расчёт Синоникса 1.9">
+      <ProjectReadiness report={result.readiness} />
       <h3>
         {result.status === "completed"
           ? "Расчёт по заданным условиям"

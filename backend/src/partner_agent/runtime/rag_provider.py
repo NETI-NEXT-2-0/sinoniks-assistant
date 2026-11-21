@@ -163,6 +163,7 @@ def prepare_request(
     project_calculation: dict[str, Any] | None = None,
     request_mode: RequestMode = "auto", new_project: bool = False,
     context_window_tokens: int = 0, max_output_tokens: int = 0,
+    pending_project_answers: bool = False,
 ) -> PreparedRequest:
     if not question.strip() or len(evidence) > 20:
         raise ProviderError("rag_context_invalid")
@@ -209,6 +210,12 @@ def prepare_request(
         "is empty, citations MUST be []. User-provided project conditions need no citation. "
         "A short user reply can answer your previous clarification: combine the current "
         "reply with the latest pending request in dialogue before choosing the response mode. "
+        "A message headed 'Ответы на уточнения проекта' contains actual user answers to "
+        "the listed project questions. Interpret each free answer into the saved requirements. "
+        "They are project conditions: do not merely store them as vendor wishes. Separate "
+        "only explicit unsupported feature requests as usual. Preserve selections already "
+        "present in the supplied project. Descriptions of missing networks and flows must "
+        "create those entities/flows; keep unknown details null and ask only what remains. "
         "Omitted excerpts are not proof of absence. "
         "Use Source title and Source locator to identify the actual file and verified "
         "page range when asked; copy the filename exactly instead of guessing or denying "
@@ -223,6 +230,17 @@ def prepare_request(
         "explain the current project without a calculation snapshot, use insufficient. "
         "For other requests set design=null. Product "
         "capability questions alone are source-based answers, not design requests. "
+        "A saved project does not change the subject of a general question about Sinoniks. "
+        "Explain how the PRODUCT works from Evidence, using grounded with citations; do not "
+        "replace that answer with the user's UDP/TCP example or claim that only the saved "
+        "project is available when Evidence contains manuals. Questions about the device, "
+        "its internal structure, manuals, presentations or slides are product/reference "
+        "requests unless the user explicitly asks to present their own project as a slide. "
+        "For follow-ups asking for sources, identify the documents supporting the previous "
+        "topic, not the traffic senders, unless the user explicitly means data sources. "
+        "If no exact presentation page was supplied, explain that narrow limitation and "
+        "offer the available cited manual excerpt; do not fabricate an ASCII slide and "
+        "present it as a document page. "
         "Design format: {schema_version:2,network_a:string|null,network_b:string|null,"
         "firewall:'A'|'B'|'both'|null,exchanges:[{requirement_id:string|null,"
         "sender_side:'A'|'B'|null,sender:string|null,receiver:string|null,"
@@ -402,6 +420,14 @@ def prepare_request(
         "(max 500 chars). Exclude availability questions. Wishes do not change project "
         "requirements or authorize a design in Reference mode. Continue supported work."
     )
+    if pending_project_answers:
+        instruction += (
+            " The supplied project is an UNSAVED draft after explicit form selections. "
+            "Interpret the free answers and return mode=design with their changes. "
+            "Even the already visible selections are not committed yet. Do not treat "
+            "this as a saved result or return project_explanation. If text is ambiguous, "
+            "ask a specific clarification without claiming the conditions were saved."
+        )
     turns = list(history or [])
     if len(turns) % 2 or any(
         item.get("role") != ("user" if index % 2 == 0 else "assistant")
@@ -424,6 +450,7 @@ def prepare_request(
     project = ""
     if design_context is not None:
         label = ("Read-only saved project conditions" if request_mode == "reference" else
+                 "Unsaved draft after form answers" if pending_project_answers else
                  "New draft requirements (not yet saved)" if new_project
                  else "Saved project conditions")
         project = "\n" + label + ":\n" + json.dumps(
@@ -473,6 +500,10 @@ def prepare_request(
             "use it to resolve phrases like the network on the right. Do not infer sides "
             "when this mapping is missing. "
             "Cite supplied evidence for product facts."
+            " The saved readiness report is the server's review: missing data is not proof "
+            "of a broken design. Explain conflicts separately from unknowns and optional "
+            "recommendations. Never claim physical deployment is guaranteed to work or "
+            "present the methodology's boundary firewall as an optional improvement."
         )
         calculation = "\nSaved calculation snapshot:\n" + json.dumps(
             project_calculation, ensure_ascii=False, separators=(",", ":"),

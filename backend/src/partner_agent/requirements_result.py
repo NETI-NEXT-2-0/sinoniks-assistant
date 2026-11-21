@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from partner_agent.project_readiness import annotate_readiness, readiness_report, readiness_text
 from partner_agent.sinoniks_calculation import solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
 from partner_agent.sinoniks_export import diagram_artifacts
@@ -178,9 +179,17 @@ def result_artifacts19(
         "json": json.dumps(result, ensure_ascii=False, indent=2) + "\n",
         "txt": text + "\n",
     }
+    scene = None
     if diagram_unavailability19(request, calculation) is None:
-        artifacts.update(diagram_artifacts(layout19(request, calculation)))
-    return {**result, "explanation": text}, artifacts
+        scene = layout19(request, calculation)
+        artifacts.update(diagram_artifacts(scene))
+    report = readiness_report(request, result, artifacts)
+    text += "\n\n" + readiness_text(report)
+    artifacts["txt"] = text + "\n"
+    if scene is not None:
+        annotate_readiness(scene, report)
+        artifacts.update(diagram_artifacts(scene))
+    return {**result, "explanation": text, "readiness": report}, artifacts
 
 
 def expert_accounting(ledger: dict[str, Any]) -> dict[str, Any]:

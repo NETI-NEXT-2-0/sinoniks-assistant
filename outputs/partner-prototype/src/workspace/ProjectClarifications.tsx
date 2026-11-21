@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, isRecord, type AuthClient } from "../api/client";
 import type { ProjectAnswerInput, ProjectFieldAnswerInput } from "../api/chats";
 import "./project-questions.css";
+import { draftKey, readDraft, saveDraft, removeDraft } from './clarificationDraft';
 
 interface Question {
   field: string;
@@ -91,6 +92,7 @@ function fieldAnswer(
   }
 }
 export function ProjectClarifications({
+  ownerId,
   auth,
   chatId,
   branchId,
@@ -102,6 +104,7 @@ export function ProjectClarifications({
   onReady,
   onExpired,
 }: {
+  ownerId: string;
   auth: AuthClient;
   chatId: string;
   branchId: string;
@@ -113,21 +116,45 @@ export function ProjectClarifications({
   onReady: () => void;
   onExpired: () => void;
 }) {
+  const storageKey = draftKey(ownerId, chatId, branchId, revisionId);
+  const [initialDraft] = useState(() => readDraft(storageKey));
+  const [draftStatus, setDraftStatus] = useState<'saved' | 'saving' | 'unavailable' | null>(initialDraft ? 'saved' : null);
+  const [submitted, setSubmitted] = useState(false);
   const [page, setPage] = useState<Page | null>(null),
     [error, setError] = useState(""),
     [retry, setRetry] = useState(0),
     [offset, setOffset] = useState(0);
-  const [values, setValues] = useState<Record<string, string>>({}),
-    [selected, setSelected] = useState<Record<string, string[]>>({}),
+  const [values, setValues] = useState<Record<string, string>>(initialDraft?.values ?? {}),
+    [selected, setSelected] = useState<Record<string, string[]>>(initialDraft?.selected ?? {}),
     [visited, setVisited] = useState<Record<string, Question>>({}),
-    [unknowns, setUnknowns] = useState<Record<string, boolean>>({}),
-    [other, setOther] = useState<Record<string, boolean>>({}),
-    [freeText, setFreeText] = useState<Record<string, string>>({}),
+    [unknowns, setUnknowns] = useState<Record<string, boolean>>(initialDraft?.unknowns ?? {}),
+    [other, setOther] = useState<Record<string, boolean>>(initialDraft?.other ?? {}),
+    [freeText, setFreeText] = useState<Record<string, string>>(initialDraft?.freeText ?? {}),
     [sending, setSending] = useState(false);
   const ready = useRef(onReady);
   ready.current = onReady;
   const expired = useRef(onExpired);
   expired.current = onExpired;
+  const draft = { values, selected, unknowns, other, freeText };
+  const currentDraft = useRef(draft);
+  currentDraft.current = draft;
+  useEffect(() => {
+    if (newer || submitted) { removeDraft(storageKey); return; }
+    if (![values, selected, unknowns, other, freeText].some(value => Object.keys(value).length)) return;
+    setDraftStatus('saving');
+    const timer = window.setTimeout(() => {
+      setDraftStatus(saveDraft(storageKey, currentDraft.current) ? 'saved' : 'unavailable');
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [storageKey, values, selected, unknowns, other, freeText, newer, submitted]);
+  function flushDraft(): void {
+    if (!newer && !submitted) setDraftStatus(saveDraft(storageKey, currentDraft.current) ? 'saved' : 'unavailable');
+  }
+  useEffect(() => {
+    const flush = () => { if (!newer && !submitted) saveDraft(storageKey, currentDraft.current); };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [storageKey, newer, submitted]);
   useEffect(() => {
     let live = true;
     if (newer) {
@@ -204,11 +231,19 @@ export function ProjectClarifications({
     if (!page?.current || disabled || sending || !count || count > 64 || invalid) return;
     setSending(true);
     setError("");
+    flushDraft();
     try {
-      if (!(await onAnswer("Применить уточнения проекта", {
+      const message = ["Ответы на уточнения проекта:",
+        ...answers.map(answer => `${visited[answer.path]?.text ?? 'Условие'}: ${answer.unknown ? 'Не знаю' : JSON.stringify(answer.value)}`),
+        ...remarks.map(remark => `${visited[remark.path]?.text ?? 'Условие'}\nОтвет: ${remark.text}`),
+      ].join("\n\n");
+      if (!(await onAnswer(message, {
         base_revision_id: revisionId, answers, ...(remarks.length ? { remarks } : {}),
       }))) {
         setError("Ответы не подтверждены. Проверьте состояние отправки или откройте актуальный проект.");
+      } else {
+        setSubmitted(true);
+        removeDraft(storageKey);
       }
     } finally {
       setSending(false);
@@ -227,11 +262,11 @@ export function ProjectClarifications({
     );
   if (!page.current)
     return (
-      <p>Уточнения относятся к прежней версии. Откройте актуальный проект.</p>
+      <p>{submitted && <span className="answer-saved">✓ Ответы приняты сервером. </span>}Уточнения относятся к прежней версии. Откройте актуальный проект.</p>
     );
   if (!page.total) return null;
   return (
-    <section className="project-questions" aria-label="Уточнения проекта">
+    <section className="project-questions" aria-label="Уточнения проекта" onBlur={flushDraft}>
       <h4>
         Уточним условия{" "}
         <span>
@@ -239,13 +274,22 @@ export function ProjectClarifications({
         </span>
       </h4>
       <p>
-        Примените готовые варианты и свои ответы вместе. Свой текст
-        сохранится в пожеланиях чата как пояснение к вопросу.
+        Примените готовые варианты и свои ответы вместе. Свободный текст
+        будет разобран как условия проекта; вопросы и ответы сохранятся в чате.
       </p>
       {error && <p role="alert">{error}</p>}
+      <p className={`draft-save-status ${draftStatus === 'saved' ? 'answer-saved' : ''}`} role="status" aria-live="polite">
+        {submitted ? '✓ Ответы приняты сервером. Проверяем применение к проекту.'
+          : draftStatus === 'saved' ? '✓ Черновик сохранён в этой вкладке. Для применения нажмите «Применить ответы».'
+          : draftStatus === 'saving' ? 'Сохраняем черновик…'
+          : draftStatus === 'unavailable' ? 'Не удалось сохранить черновик в браузере. Оставьте вкладку открытой до отправки.' : ''}
+      </p>
       {page.questions.map((question) => (
           <fieldset key={question.field} disabled={disabled || sending}>
             <legend>{question.text}</legend>
+            {draftStatus === 'saved' && (values[question.field] || freeText[question.field]?.trim()
+              || selected[question.field]?.length || unknowns[question.field]) && !submitted &&
+              <span className="field-saved-check" title="Черновик ответа сохранён в этой вкладке" aria-label="Черновик ответа сохранён">✓</span>}
             {showsFreeText(question) ? (
               <label>
                 Свой ответ

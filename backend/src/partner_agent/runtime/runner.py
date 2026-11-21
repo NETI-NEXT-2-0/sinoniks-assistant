@@ -8,6 +8,7 @@ from uuid import UUID
 
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from pydantic import ValidationError
 
 from partner_agent.design_service import context_revision, project_readout
 from partner_agent.infra.db import session_factory
@@ -16,6 +17,12 @@ from partner_agent.infra.models import User
 from partner_agent.infra.models_designs import RunDesignContext
 from partner_agent.infra.models_stage2 import Run
 from partner_agent.infra.settings import get_settings
+from partner_agent.project_answers import (
+    apply_answer,
+    needs_text_interpretation,
+    parse_project_answer,
+    reapply_structured_answers,
+)
 from partner_agent.retrieval.service import search_answer_evidence, validate_evidence_access
 from partner_agent.runs.service import StaleOwnership, lock_run, publish_prefix
 from partner_agent.runtime.accounting import accounting_scope
@@ -36,6 +43,7 @@ from partner_agent.runtime.rag_provider import (
     prepare_request,
 )
 from partner_agent.runtime.recovery import recovery_message
+from partner_agent.sinoniks_contract19 import Requirements19
 
 
 async def execute_run(
@@ -44,11 +52,24 @@ async def execute_run(
     claim = await claim_run(run_id, dispatch_generation, scheduler_id)
     if claim is None:
         return {"status": "duplicate_or_ineligible", "run_id": str(run_id)}
-    if claim.project_answer is not None:
+    interpret_answers = (claim.interpret_project_answer
+                         and needs_text_interpretation(claim.project_answer))
+    if claim.project_answer is not None and not interpret_answers:
         from partner_agent.runtime.project_answer import execute_project_answer
 
         return await execute_project_answer(claim)
     settings = get_settings()
+    answer_command = parse_project_answer(claim.project_answer) if interpret_answers else None
+    form_metadata = ({"execution": "model_project_answer", "project_answer": claim.project_answer,
+                      "interpret_project_answer": True}
+                     if interpret_answers else {})
+    if interpret_answers and settings.runtime_profile == "offline_fixture":
+        status = await complete(claim.ownership, "succeeded", {
+            **form_metadata, "provider_calls": 0, "answer_mode": "insufficient",
+            "task_completed": False, "response_status": "needs_clarification",
+        }, text="Свободные ответы сохранены в сообщении. Для их разбора нужно подключение модели; "
+           "проект пока не изменён. Готовые варианты можно применить без модели.")
+        return {"status": status, "run_id": str(run_id)}
     if settings.runtime_profile != "offline_fixture":
         parent = asyncio.current_task()
         assert parent is not None
@@ -106,6 +127,14 @@ async def execute_run(
                         from partner_agent.requirements_service import without_sources
 
                         project_context = without_sources(project.input)
+                        if answer_command is not None:
+                            if project.id != answer_command.base_revision_id:
+                                raise APIError(409, "design_revision_conflict", "Reload answers")
+                            project_context = without_sources(apply_answer(
+                                Requirements19.model_validate(project.input), answer_command,
+                            ).model_dump(mode="json"))
+                    elif answer_command is not None:
+                        raise APIError(409, "design_revision_conflict", "Project unavailable")
                     new_project = bool(
                         project is None and current_run.request_mode != "reference"
                         and (current_run.outcome or {}).get("design_input_version") == 3
@@ -126,11 +155,13 @@ async def execute_run(
                     await validate_evidence_access(
                         db, actor, [*evidence, *history_sources], chat_id=claim.ownership.chat_id
                     )
-                    calculation = project_readout(project) if project is not None else None
+                    calculation = (project_readout(project)
+                                   if project is not None and answer_command is None else None)
                     prepared = prepare_request(
                         str(question), evidence, history, design_context=project_context,
                         project_calculation=calculation, request_mode=current_run.request_mode,
                         new_project=new_project,
+                        pending_project_answers=answer_command is not None,
                         context_window_tokens=settings.model_context_window_tokens,
                         max_output_tokens=settings.model_max_output_tokens,
                     )
@@ -151,6 +182,20 @@ async def execute_run(
                             settings, str(question), evidence, **options,
                         )
                     usage = result["usage"]
+                    if answer_command is not None and result.get("design") is not None:
+                        try:
+                            if not isinstance(result["design"], Requirements19):
+                                raise ValueError("Requirements v3 expected")
+                            result["design"] = reapply_structured_answers(
+                                result["design"], answer_command,
+                            )
+                        except (ValidationError, APIError, ValueError):
+                            raise ProviderError("provider_invalid_design_answer",
+                                                usage=usage) from None
+                        if project is not None and without_sources(
+                            result["design"].model_dump(mode="json"),
+                        ) == without_sources(project.input):
+                            raise ProviderError("provider_project_answer_unresolved", usage=usage)
                 except ProviderError as error:
                     usage = error.usage or {}
                     raise
@@ -175,6 +220,7 @@ async def execute_run(
                         f"Запрос выполнен для версии №{project.revision}.\n\n{answer}"
                     )
                 success_outcome: dict[str, Any] = {
+                    **form_metadata,
                     "profile": settings.runtime_profile, "citations": result["citations"],
                     "usage": result["usage"], "estimated_cost_usd": actual_cost,
                     "usage_complete": actual_cost is not None, "answer_mode": answer_mode,
@@ -225,7 +271,8 @@ async def execute_run(
                 "runtime_timeout" if isinstance(error, TimeoutError)
                 else getattr(error, "code", "provider_execution_failed")
             )
-            failure: dict[str, Any] = {"code": code, "profile": settings.runtime_profile}
+            failure: dict[str, Any] = {**form_metadata, "code": code,
+                                       "profile": settings.runtime_profile}
             if not provider_started:
                 failure["provider_calls"] = 0
             if (settings.developer_diagnostics_enabled and settings.environment != "production"):
