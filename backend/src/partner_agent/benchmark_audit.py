@@ -24,11 +24,24 @@ def compare_native_export(expert: dict[str, Any], native: Element) -> list[str]:
     if not isinstance(expected, list) or metadata is None:
         return ["export_rules_unverified"] if expected else []
     actual = json.loads(metadata)
+    fields = ("from_network_id", "to_network_id", "checks_by_network")
     if native.get("data-placement-pending") == "true":
-        if (expert.get("synonyx") is None and actual == []
-                and not native.findall(".//mxCell[@edge='1']")):
-            return []
-        return ["export_preview_mismatch"]
+        if (expert.get("synonyx") is not None or actual != []
+                or native.findall(".//mxCell[@edge='1']")):
+            return ["export_preview_mismatch"]
+        known_file_checks = {
+            rule["rule_id"]: [
+                {field: lane[field] for field in fields} for lane in rule["directions"]
+            ]
+            for rule in expected if rule["type"] == "file" and rule.get("checks")
+        }
+        preview_checks = json.loads(native.get("data-preview-file-checks", "{}"))
+        if not isinstance(preview_checks, dict) or any(
+            preview_checks.get(identifier) != directions
+            for identifier, directions in known_file_checks.items()
+        ):
+            return ["export_file_checks_mismatch"]
+        return []
     if not isinstance(actual, list) or len(actual) != len(expected):
         return ["export_rule_count_mismatch"]
     issues = []
@@ -42,7 +55,6 @@ def compare_native_export(expert: dict[str, Any], native: Element) -> list[str]:
         ):
             issues.append("export_protocol_mismatch")
         if rule["type"] == "file" and any(rule.get("checks", [])):
-            fields = ("from_network_id", "to_network_id", "checks_by_network")
             directions = [{field: lane[field] for field in fields} for lane in rule["directions"]]
             if directions != row.get("file_check_directions"):
                 issues.append("export_file_checks_mismatch")

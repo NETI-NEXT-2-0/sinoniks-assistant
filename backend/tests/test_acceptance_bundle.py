@@ -139,6 +139,24 @@ def test_collection_flags_protocol_mismatch_between_exports(tmp_path):
     assert report(folder)["cases"][0]["issues"] == ["export_protocol_mismatch"]
 
 
+def test_collection_requires_known_file_checks_in_unplaced_preview(tmp_path):
+    folder, records = captured(tmp_path)
+    first = records["captures"][0]
+    directions = [{"from_network_id": "office", "to_network_id": "plant",
+                   "checks_by_network": {"office": [{"kind": "size", "details": None}],
+                                         "plant": None}}]
+    rule = {"type": "file", "rule_id": "file-rule", "directions": directions, "checks": ["size"]}
+    write(folder / first["expert"], {"session_id": first["session_id"], "rules": [rule]})
+    native = Element("mxfile", {"data-rule-rows": "[]", "data-placement-pending": "true"})
+    SubElement(native, "diagram")
+    path = folder / first["drawio"]
+    path.write_bytes(tostring(native))
+    assert report(folder)["cases"][0]["issues"] == ["export_file_checks_mismatch"]
+    native.set("data-preview-file-checks", json.dumps({"file-rule": directions}))
+    path.write_bytes(tostring(native))
+    assert not report(folder)["cases"][0]["issues"]
+
+
 @pytest.mark.parametrize("change", ["unknown_usage", "false_cost", "old_tariff", "orphan_call",
                                    "unknown_attempts", "false_call_count",
                                    "wrong_sha", "manual", "missing", "card_only", "slow"])
