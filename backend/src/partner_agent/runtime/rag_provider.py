@@ -448,6 +448,10 @@ def prepare_request(
             "use it to resolve phrases like the network on the right. Do not infer sides "
             "when this mapping is missing. "
             "Cite supplied evidence for product facts."
+            " The saved readiness report is the server's review: missing data is not proof "
+            "of a broken design. Explain conflicts separately from unknowns and optional "
+            "recommendations. Never claim physical deployment is guaranteed to work or "
+            "present the methodology's boundary firewall as an optional improvement."
         )
         calculation = "\nSaved calculation snapshot:\n" + json.dumps(
             project_calculation, ensure_ascii=False, separators=(",", ":"),

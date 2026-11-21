@@ -3,8 +3,11 @@ import { ApiError, type AuthClient } from "../api/client";
 import type { ProjectAnswerInput, SubmittedWishInput } from "../api/chats";
 import { DiagramViewer } from "./DiagramViewer";
 import { ProjectClarifications } from "./ProjectClarifications";
+import type { ReadinessReport } from "../api/readiness";
+import { ProjectReadiness } from "./ProjectReadiness";
 
 interface Props {
+  readiness?: ReadinessReport | null;
   auth: AuthClient;
   chatId: string;
   id: string;
@@ -23,6 +26,7 @@ interface Props {
   onDiagramReady?: () => void;
 }
 export function DesignResultCard({
+  readiness,
   auth,
   chatId,
   id,
@@ -91,6 +95,7 @@ export function DesignResultCard({
       aria-label={`Проект Синоникса · версия ${revision}`}
     >
       <strong>Проект Синоникса · версия {revision}</strong>
+      <ProjectReadiness report={readiness} compact />
       <p>
         {requirements && calculated
           ? "Расчёт Синоникса 1.9 сохранён. Откройте проект для пояснения, правил и ограничений."
