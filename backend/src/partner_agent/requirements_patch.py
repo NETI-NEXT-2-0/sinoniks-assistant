@@ -34,6 +34,22 @@ class RequirementsPatch(StrictModel):
     operations: list[EntityEdit] = Field(min_length=1, max_length=64)
 
 
+def normalize_optional_text(value: Any) -> Any:
+    """A blank nullable label denotes an unknown, never an invented value.
+
+    Identifiers, enum values, required explanations and numeric fields remain
+    strict. Imported immutable metadata is not rewritten.
+    """
+    if isinstance(value, list):
+        return [normalize_optional_text(item) for item in value]
+    if isinstance(value, dict):
+        return {key: item if key == "legacy" else None
+                if key in {"name", "purpose", "policy", "details", "existing_firewall_name"}
+                and isinstance(item, str) and not item.strip()
+                else normalize_optional_text(item) for key, item in value.items()}
+    return value
+
+
 def compact_project(document: dict[str, Any]) -> dict[str, Any]:
     """Lossless model view: omit default values and immutable import metadata.
 
@@ -50,7 +66,7 @@ def compact_project(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
-    patch = RequirementsPatch.model_validate(proposal)
+    patch = RequirementsPatch.model_validate(normalize_optional_text(proposal))
     if without_sources(proposal) != proposal:
         raise PatchError("Model provenance is not accepted")
     original = Requirements19.model_validate(base).model_dump(mode="json")

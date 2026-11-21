@@ -6,7 +6,12 @@ from pydantic import ValidationError
 from test_sinoniks_contract19 import data_project, file_project
 
 from partner_agent.infra.settings import Settings
-from partner_agent.requirements_patch import PatchError, apply_patch, compact_project
+from partner_agent.requirements_patch import (
+    PatchError,
+    apply_patch,
+    compact_project,
+    normalize_optional_text,
+)
 from partner_agent.runtime.provider import ProviderError
 from partner_agent.runtime.rag_provider import answer_with_provider, prepare_request
 from partner_agent.sinoniks_contract19 import Requirements19
@@ -100,6 +105,21 @@ def test_root_change_clears_old_assumption_for_that_choice_only():
     updated = apply(base, edit(collection="project", identifier=None, protected_network_id=None))
     assert updated.assumptions == []
     assert updated.protected_network_id is None
+
+
+def test_blank_optional_text_is_unknown_without_relaxing_identifiers_or_types():
+    base = data_project()
+    before = deepcopy(base)
+    base["flows"][0]["policy"] = " "
+    normalized = normalize_optional_text(base)
+    assert Requirements19.model_validate(normalized).flows[0].policy is None
+    assert base["flows"][0]["policy"] == " "
+    updated = apply(before, edit(collection="flows", identifier="logs", policy=""))
+    assert updated.flows[0].policy is None
+    for field, value in (("network_id", ""), ("kind", "")):
+        with pytest.raises((PatchError, ValidationError)):
+            apply(before, edit(**{field: value}))
+    assert normalize_optional_text({"legacy": {"name": ""}}) == {"legacy": {"name": ""}}
 
 
 def test_compact_view_preserves_semantic_null_and_empty_checks():
@@ -200,3 +220,26 @@ async def test_provider_patch_applies_only_to_captured_base(monkeypatch):
     with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
         await answer_with_provider(settings, "Переименуй", [], design_context=base,
                                    request_mode="reference")
+
+
+@pytest.mark.asyncio
+async def test_initial_provider_blank_policy_saves_as_unknown(monkeypatch):
+    proposal = data_project()
+    proposal["flows"][0]["policy"] = ""
+    async def model(settings, messages):
+        return {"choices": [{"message": {"content": json.dumps({
+            "answer": "Создано", "mode": "design", "design": proposal, "citations": [],
+        })}}]}
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    prepared = prepare_request("Построй", [], design_context={"schema_version": 3, "id": "draft"},
+                               new_project=True)
+    result = await answer_with_provider(settings, "Построй", [], prepared=prepared)
+    assert result["design"].flows[0].policy is None
+    assert result["design"].flows[0].destination_port == 514
+
+
+def test_large_utf8_context_stays_below_tariff_tier_before_any_call():
+    with pytest.raises(ProviderError, match="rag_context_limit"):
+        prepare_request("😀" * 65000, [], context_window_tokens=1050000,
+                        max_output_tokens=3000)

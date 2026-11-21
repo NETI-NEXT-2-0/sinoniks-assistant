@@ -10,7 +10,12 @@ from pydantic import ValidationError
 
 from partner_agent.documents.edited_copy import MAX_SECTION_TITLE
 from partner_agent.infra.settings import Settings
-from partner_agent.requirements_patch import PatchError, apply_patch, compact_project
+from partner_agent.requirements_patch import (
+    PatchError,
+    apply_patch,
+    compact_project,
+    normalize_optional_text,
+)
 from partner_agent.requirements_service import without_sources
 from partner_agent.runs.types import RequestMode
 from partner_agent.runtime.provider import (
@@ -223,6 +228,7 @@ def prepare_request(
             "directly route the networks are outside this exchange design: explain the limit, "
             "return insufficient with design=null, and preserve the valid project. "
             "Never invent known values. "
+            "Unknown nullable labels (name, purpose, policy, details) must be null, never ''. "
             "New entities need unique temporary IDs and valid references; the server assigns "
             "their permanent IDs. Return no sources anywhere. Never alter legacy metadata. "
             "Optional protected_network_id:null|string records an explicitly agreed protected "
@@ -396,7 +402,7 @@ def prepare_request(
         # admits larger complete projects, with a separate conservative token
         # bound: every UTF-8 byte may consume a token, plus message overhead.
         # Never truncate a project's arrays or lower-priority source excerpts.
-        remaining = context_window_tokens - max_output_tokens
+        remaining = min(context_window_tokens - max_output_tokens, 256000)
         char_limit = min(256000, remaining) if context_window_tokens else 32000
         return len(serialized) <= char_limit and (
             not context_window_tokens
@@ -581,6 +587,7 @@ async def answer_with_provider(
             if request.input_version == 3:
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
+                proposal = normalize_optional_text(proposal)
                 try:
                     conditions = Requirements19.model_validate(proposal)
                 except ValidationError as invalid:
