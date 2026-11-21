@@ -5,6 +5,7 @@ import json
 import zlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
+from decimal import ROUND_CEILING, Decimal
 from typing import Any
 
 import httpx
@@ -101,6 +102,21 @@ def estimate_cost_usd(settings: Settings, usage: dict[str, int]) -> float | None
 def enforce_request_cap(settings: Settings, estimated_cost_usd: float) -> None:
     if settings.model_request_cap_usd and estimated_cost_usd > settings.model_request_cap_usd:
         raise ProviderError("provider_request_cap_exceeded")
+
+
+def reservation_cost_usd(settings: Settings) -> float:
+    context = settings.model_context_window_tokens
+    if settings.model_contest_mode and context:
+        inbound = context * Decimal(str(settings.model_input_usd_per_million))
+        outbound = settings.model_max_output_tokens * Decimal(
+            str(settings.model_output_usd_per_million)
+        )
+        return float((inbound + outbound).to_integral_value(rounding=ROUND_CEILING) / 1_000_000)
+    estimate = estimate_cost_usd(settings, {
+        "prompt_tokens": 4000, "completion_tokens": settings.model_max_output_tokens,
+    })
+    assert estimate is not None
+    return estimate
 
 
 def enforce_daily_cap(settings: Settings, spent_usd: float, estimated_cost_usd: float) -> None:

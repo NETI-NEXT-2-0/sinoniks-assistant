@@ -22,6 +22,8 @@ from partner_agent.infra.models_documents import (
 )
 from partner_agent.infra.models_stage2 import ContextManifest
 from partner_agent.infra.settings import get_settings
+from partner_agent.runtime.ledger import reserve_daily_usage
+from partner_agent.runtime.provider import ProviderError, reservation_cost_usd
 from partner_agent.runtime.runner import execute_run
 
 pytestmark = pytest.mark.integration
@@ -352,6 +354,77 @@ async def test_model_limit_and_rejected_usage(corpus, monkeypatch, scenario, cap
     finally:
         async with session_factory()() as db:
             await db.execute(delete(ModelUsageDaily).where(ModelUsageDaily.model == name))
+            await db.commit()
+
+
+@pytest.mark.parametrize("cap_type", ["request", "daily"])
+async def test_contest_spend_cap_rejects_before_transport(corpus, monkeypatch, cap_type):
+    _, _, client, headers, _, _, _, _ = corpus
+    configure_execution(monkeypatch)
+    name = "contest-limit-" + uuid.uuid4().hex
+    for key, value in {
+        "PARTNER_MODEL_NAME": name,
+        "PARTNER_MODEL_CATALOG_ID": name,
+        "PARTNER_MODEL_CONTEST_MODE": "true",
+        "PARTNER_MODEL_PROVIDER_VARIANT": "synthetic/route",
+        "PARTNER_MODEL_PRICE_SNAPSHOT": "synthetic-snapshot",
+        "PARTNER_MODEL_CONTEXT_WINDOW_TOKENS": "262144",
+        "PARTNER_MODEL_INPUT_USD_PER_MILLION": "0.09",
+        "PARTNER_MODEL_OUTPUT_USD_PER_MILLION": "0.30",
+        f"PARTNER_MODEL_{cap_type.upper()}_CAP_USD": "0.02",
+    }.items():
+        monkeypatch.setenv(key, value)
+    get_settings.cache_clear()
+
+    async def unexpected_transport(*args, **kwargs):
+        pytest.fail("The configured cap must be checked before calling the provider")
+
+    monkeypatch.setattr("partner_agent.runtime.runner.answer_with_provider", unexpected_transport)
+    chat = await new_chat(client, headers)
+    admitted = await submit(client, headers, chat, text="Synthetic course")
+    run_id = admitted.json()["run_id"]
+    assert (await execute_run(uuid.UUID(run_id), dispatch_generation=0))["status"] == "failed"
+    outcome = (await client.get(f"/api/v1/runs/{run_id}")).json()["outcome"]
+    assert outcome["code"] == f"provider_{cap_type}_cap_exceeded"
+    assert outcome["provider_calls"] == 0
+    async with session_factory()() as db:
+        assert await db.scalar(select(ModelUsageDaily).where(ModelUsageDaily.model == name)) is None
+
+
+async def test_two_first_reservations_share_the_daily_row(corpus, monkeypatch):
+    configure_execution(monkeypatch)
+    settings = get_settings().model_copy(update={
+        "model_name": "concurrent-" + uuid.uuid4().hex,
+        "model_daily_cap_usd": 0.03,
+        "model_contest_mode": True,
+        "model_context_window_tokens": 262144,
+        "model_input_usd_per_million": 0.09,
+        "model_output_usd_per_million": 0.30,
+    })
+    estimate = reservation_cost_usd(settings)
+
+    async def reserve():
+        async with session_factory()() as db:
+            try:
+                await reserve_daily_usage(db, settings, estimate)
+                await db.commit()
+            except ProviderError as exc:
+                return exc.code
+            return "reserved"
+
+    try:
+        outcomes = await asyncio.gather(reserve(), reserve())
+        assert sorted(outcomes) == ["provider_daily_cap_exceeded", "reserved"]
+        async with session_factory()() as db:
+            row = await db.scalar(select(ModelUsageDaily).where(
+                ModelUsageDaily.model == settings.model_name
+            ))
+            assert row.spent_usd_micros == 24493 and row.request_count == 1
+    finally:
+        async with session_factory()() as db:
+            await db.execute(delete(ModelUsageDaily).where(
+                ModelUsageDaily.model == settings.model_name
+            ))
             await db.commit()
 
 

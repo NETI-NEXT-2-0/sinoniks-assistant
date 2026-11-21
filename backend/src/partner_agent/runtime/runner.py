@@ -23,7 +23,12 @@ from partner_agent.runtime.fenced import FencedSaver
 from partner_agent.runtime.fixture import FixtureFailure, fixture_graph
 from partner_agent.runtime.ledger import reconcile_daily_usage, reserve_daily_usage
 from partner_agent.runtime.lifecycle import claim_run, complete, heartbeat, wait_for_input
-from partner_agent.runtime.provider import ProviderError, enforce_request_cap, estimate_cost_usd
+from partner_agent.runtime.provider import (
+    ProviderError,
+    enforce_request_cap,
+    estimate_cost_usd,
+    reservation_cost_usd,
+)
 from partner_agent.runtime.rag_provider import (
     ProviderOptions,
     answer_with_provider,
@@ -117,11 +122,7 @@ async def execute_run(
                         new_project=new_project,
                     )
                     evidence = prepared.evidence
-                    estimate = estimate_cost_usd(
-                        settings, {"prompt_tokens": 4000,
-                                   "completion_tokens": settings.model_max_output_tokens}
-                    )
-                    assert estimate is not None
+                    estimate = reservation_cost_usd(settings)
                     enforce_request_cap(settings, estimate)
                     reservation_day = await reserve_daily_usage(db, settings, estimate)
                     await db.commit()

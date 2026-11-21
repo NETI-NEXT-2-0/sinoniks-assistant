@@ -7,6 +7,7 @@ from partner_agent.accounting_routes import summarize
 from partner_agent.infra.settings import Settings
 from partner_agent.runtime.accounting import tariff_snapshot
 from partner_agent.runtime.accounting_math import priced_usage, usage_record
+from partner_agent.runtime.provider import reservation_cost_usd
 
 
 def test_case_example_cache_and_reasoning_are_not_double_charged():
@@ -71,6 +72,12 @@ def test_contest_mode_fails_closed_on_missing_or_expensive_declaration():
     values.update(model_catalog_id="synthetic/catalog", model_provider_variant="synthetic/route",
                   model_price_snapshot="synthetic-date", model_input_usd_per_million=0.1)
     assert Settings(_env_file=None, **values).model_contest_mode is True
+    capped = values | {"model_request_cap_usd": 0.025, "model_output_usd_per_million": 0.30,
+                       "model_input_usd_per_million": 0.09}
+    with pytest.raises(ValidationError, match="declared route context window"):
+        Settings(_env_file=None, **capped)
+    route = Settings(_env_file=None, **capped, model_context_window_tokens=262144)
+    assert reservation_cost_usd(route) == 0.024493
     values["model_input_usd_per_million"] = 0.100001
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **values)
