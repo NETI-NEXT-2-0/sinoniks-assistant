@@ -219,6 +219,8 @@ def prepare_request(
             "side when both networks are open. Never relabel an open network as closed. "
             "Never invent this choice: leave it absent/null until the user chooses; it is a "
             "project assumption, not a change of trust. A root unknown uses target_id=null. "
+            "Optional existing_firewall_name preserves the stated name of the installed "
+            "boundary firewall to reuse. Include it only when the user identifies that firewall. "
             "For mixed supported/unsupported requests, preserve supported flows in the design "
             "and record the unsupported request in requests_for_vendor; do not discard valid work. "
             "Saving a project, calculating rules, drawing its diagram and exporting draw.io or "

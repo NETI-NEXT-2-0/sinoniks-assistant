@@ -72,6 +72,7 @@ export interface RequirementsInput {
   actors?: { id: string; name: string | null }[];
   manual_users?: { lower: number; upper: number | null } | null;
   protected_network_id?: string | null;
+  existing_firewall_name?: string | null;
   unknowns?: Note19[];
   assumptions?: Note19[];
   requests_for_vendor?: unknown[];

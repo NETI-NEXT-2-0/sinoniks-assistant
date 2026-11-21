@@ -3,7 +3,7 @@ from dataclasses import asdict
 
 from partner_agent.sinoniks_calculation import RuleCalculation, solve_project
 from partner_agent.sinoniks_contract19 import FileCheck19, FileFlow19, Requirements19
-from partner_agent.sinoniks_data_rules import DataRule
+from partner_agent.sinoniks_data_rules import DataRule, existing_firewall_details
 from partner_agent.sinoniks_file_rules import FileIssue, FileRule
 
 FILE_ISSUE_LABELS = {
@@ -188,7 +188,9 @@ def result_document(
         "schema_version": "1.1", "session_id": session_id.strip(), "status": status,
         "networks": [{"id": network.id, "name": network.name, "trust": network.trust}
                      for network in request.networks],
-        "firewall": None if placement is None else {"side": placement.recommended_firewall_side},
+        "firewall": None if placement is None else {
+            "side": placement.recommended_firewall_side, **existing_firewall_details(request),
+        },
         "synonyx": None if placement is None else {
             "location": "closed", "node_a_faces": "open", "node_b_faces": "closed",
             "node_a_network_id": placement.node_a_network_id,
