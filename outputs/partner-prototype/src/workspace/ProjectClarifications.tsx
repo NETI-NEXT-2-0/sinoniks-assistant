@@ -1,7 +1,7 @@
 import { projectSourceError } from "./projectErrors";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, isRecord, type AuthClient } from "../api/client";
-import type { ProjectAnswerInput } from "../api/chats";
+import type { ProjectAnswerInput, SubmittedWishInput } from "../api/chats";
 import "./project-questions.css";
 
 interface Question {
@@ -62,7 +62,7 @@ export function ProjectClarifications({
   newer: boolean;
   disabled: boolean;
   refresh: number;
-  onAnswer: (message: string, answer?: ProjectAnswerInput) => Promise<boolean>;
+  onAnswer: (message: string, answer?: ProjectAnswerInput, wish?: SubmittedWishInput) => Promise<boolean>;
   onReady: () => void;
   onExpired: () => void;
 }) {
@@ -132,6 +132,8 @@ export function ProjectClarifications({
           if (
             !(await onAnswer(
               `${question.text} Другое: ${values[question.field] ?? ""}`,
+              undefined,
+              { kind: "free_text", text: values[question.field] ?? "" },
             ))
           )
             setError("Ответ не подтверждён. Проверьте состояние отправки.");
@@ -213,8 +215,8 @@ export function ProjectClarifications({
         </span>
       </h4>
       <p>
-        Выбор варианта сохраняется без обращения к модели. «Другое» отправит
-        обычное сообщение.
+        Выбор варианта сохраняется без обращения к модели. «Другое» сохранит
+        свободный ответ в сессии и отправит его модели.
       </p>
       {error && <p role="alert">{error}</p>}
       {page.questions.map((question) => (

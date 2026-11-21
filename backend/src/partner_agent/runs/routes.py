@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 
 from partner_agent.auth.routes import DB, api_rate_limit, authenticated, unsafe_session
@@ -32,6 +32,20 @@ from partner_agent.sinoniks_contract19 import Requirements19
 router = APIRouter(prefix="/api/v1", tags=["runs"], dependencies=[Depends(api_rate_limit)])
 
 
+class SubmittedWish(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["free_text"] = "free_text"
+    text: str = Field(min_length=1, max_length=500)
+
+    @field_validator("text")
+    @classmethod
+    def original_text(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Wish must contain original text")
+        value.encode("utf-8")
+        return value
+
+
 class RunBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     branch_id: uuid.UUID
@@ -40,6 +54,15 @@ class RunBody(BaseModel):
     web_mode: Literal["off", "public", "official"] = "off"
     request_mode: RequestMode = "auto"
     project_answer: ProjectAnswer19 | None = None
+    vendor_wish: SubmittedWish | None = None
+
+    @model_validator(mode="after")
+    def wish_is_user_text(self) -> "RunBody":
+        if self.vendor_wish is not None and (
+            self.vendor_wish.text not in self.message or self.project_answer is not None
+        ):
+            raise ValueError("A free-text wish must be part of the submitted message")
+        return self
 
     @field_validator("message")
     @classmethod
@@ -74,6 +97,8 @@ async def submit(
     normalized = body.model_dump(mode="json")
     if body.project_answer is None:
         normalized.pop("project_answer")
+    if body.vendor_wish is None:
+        normalized.pop("vendor_wish")
     if body.request_mode == "auto":
         # Keep pre-0027 command hashes replayable, including explicit auto.
         normalized.pop("request_mode")
@@ -101,6 +126,9 @@ async def submit(
     if body.project_answer is not None:
         run.outcome = {"project_answer": body.project_answer.model_dump(mode="json")}
     result = await admission_response(db, chat, run)
+    if body.vendor_wish is not None:
+        # The immutable admission receipt survives cancellation, crashes and outcome replacement.
+        result = {**result, "vendor_wish": body.vendor_wish.model_dump(mode="json")}
     save_admission(db, chat, user, "run", idempotency_key or "", normalized, run, result)
     await db.commit()
     return result

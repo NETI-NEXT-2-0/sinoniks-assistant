@@ -280,7 +280,7 @@ async def test_vendor_wishes_export_preserves_user_words_and_is_private(plane, m
     assert revision["revision"] == 1 and revision["result"]["logical_rule_count"] == 1
     assert original not in json.dumps(revision["input"], ensure_ascii=False)
     reference = (await client.get(f"/api/v1/runs/{turns[3]['run_id']}")).json()
-    assert "vendor_wishes" not in reference["outcome"]
+    assert reference["outcome"]["vendor_wishes"] == [{"kind": "free_text", "text": other}]
 
     export = base + "/vendor-wishes/export"
     exported = await client.get(export)

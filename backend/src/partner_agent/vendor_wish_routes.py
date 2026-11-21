@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from partner_agent.auth.routes import DB, api_rate_limit, authenticated
 from partner_agent.infra.errors import APIError
-from partner_agent.infra.models_stage2 import Run
+from partner_agent.infra.models_stage2 import Admission, Run
 from partner_agent.runs.service import lock_chat
 
 router = APIRouter(prefix="/api/v1/chats", tags=["vendor-wishes"],
@@ -19,20 +19,35 @@ async def export_vendor_wishes(chat_id: UUID, request: Request, db: DB) -> JSONR
     await lock_chat(db, chat_id, actor)
     wishes = Run.outcome["vendor_wishes"]
     rows = (await db.execute(
-        select(Run.id, Run.input_message_id, Run.branch_id, Run.created_at, wishes.label("wishes"))
+        select(Run.id, Run.input_message_id, Run.branch_id, Run.created_at, Run.queue_seq,
+               wishes.label("wishes"))
         .where(Run.chat_id == chat_id, Run.status == "succeeded", wishes.is_not(None))
         .order_by(Run.queue_seq)
         .limit(1001)
     )).mappings().all()
-    if len(rows) > 1000:
+    submitted = (await db.execute(
+        select(Run.id, Run.input_message_id, Run.branch_id, Run.created_at, Run.queue_seq,
+               Admission.response["vendor_wish"].label("wish"))
+        .join(Admission, Admission.run_id == Run.id)
+        .where(Run.chat_id == chat_id, Admission.chat_id == chat_id, Admission.operation == "run",
+               Admission.response["vendor_wish"].is_not(None))
+        .order_by(Run.queue_seq).limit(1001)
+    )).mappings().all()
+    if len(rows) > 1000 or len(submitted) > 1000:
         raise APIError(422, "vendor_wishes_export_limit", "Session exceeds the wish export limit")
     unique: dict[tuple[str, str], dict[str, str]] = {}
-    for row in rows:
-        for entry in row["wishes"]:
+    combined = [(row, [row["wish"]], "user_submission") for row in submitted]
+    combined.extend((row, row["wishes"], "model_quote") for row in rows)
+    combined.sort(key=lambda item: item[0]["queue_seq"])
+    for row, entries, origin in combined:
+        for entry in entries:
             unique.setdefault((entry["kind"], entry["text"]), {
                 **entry, "turn_id": str(row["id"]), "message_id": str(row["input_message_id"]),
                 "branch_id": str(row["branch_id"]), "created_at": row["created_at"].isoformat(),
+                "origin": origin,
             })
+    if len(unique) > 1000:
+        raise APIError(422, "vendor_wishes_export_limit", "Session exceeds the wish export limit")
     return JSONResponse({
         "schema_version": 1, "session_id": str(chat_id), "wishes": list(unique.values()),
     }, headers={

@@ -253,7 +253,7 @@ async def complete(
             else:
                 assert row.result is not None
                 text = row.result["explanation"] + "\n\nСхема и файлы доступны в карточке проекта."
-        if status == "succeeded" and run.request_mode != "reference" and vendor_wishes is not None:
+        if status == "succeeded" and vendor_wishes is not None:
             source = await db.get(Message, run.input_message_id)
             if source is not None:
                 wishes = validated_vendor_wishes(vendor_wishes, source.content)

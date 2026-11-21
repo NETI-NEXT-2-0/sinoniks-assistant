@@ -234,13 +234,13 @@ def prepare_request(
             "For product or general information also suggest Reference mode. "
             "Never return conversation/grounded in this mode or fabricate conditions to comply."
         )
-    if request_mode != "reference":
-        instruction += (
-            " Optional vendor_wishes: at most 5 {kind,text} objects. Use kind=unsupported "
-            "for explicit requests for unsupported features, kind=free_text for text answering "
-            "Other. Copy a complete verbatim excerpt from the current request (max 500 chars). "
-            "Exclude availability questions. Continue supported design without adding the wish."
-        )
+    instruction += (
+        " Optional vendor_wishes: at most 5 {kind,text} objects in every request mode. "
+        "Use kind=unsupported for explicit requests for unsupported features, kind=free_text "
+        "for text answering Other. Copy a complete verbatim excerpt from the current request "
+        "(max 500 chars). Exclude availability questions. Wishes do not change project "
+        "requirements or authorize a design in Reference mode. Continue supported work."
+    )
     turns = list(history or [])
     if len(turns) % 2 or any(
         item.get("role") != ("user" if index % 2 == 0 else "assistant")
@@ -434,4 +434,4 @@ async def answer_with_provider(
     return {**validated, "usage": usage, "answer_mode": mode,
             **({"design": conditions} if conditions is not None else {}),
             **({"vendor_wishes": decoded["vendor_wishes"]}
-               if request_mode != "reference" and "vendor_wishes" in decoded else {})}
+               if "vendor_wishes" in decoded else {})}

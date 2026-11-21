@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type AuthClient } from "../api/client";
-import type { ProjectAnswerInput } from "../api/chats";
+import type { ProjectAnswerInput, SubmittedWishInput } from "../api/chats";
 import { DiagramViewer } from "./DiagramViewer";
 import { ProjectClarifications } from "./ProjectClarifications";
 
@@ -17,7 +17,7 @@ interface Props {
   newer?: boolean;
   disabled?: boolean;
   questionsRefresh?: number;
-  onAnswer?: (message: string, answer?: ProjectAnswerInput) => Promise<boolean>;
+  onAnswer?: (message: string, answer?: ProjectAnswerInput, wish?: SubmittedWishInput) => Promise<boolean>;
   open: () => void;
   onExpired: () => void;
   onDiagramReady?: () => void;
