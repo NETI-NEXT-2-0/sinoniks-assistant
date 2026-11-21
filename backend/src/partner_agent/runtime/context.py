@@ -94,11 +94,6 @@ async def answer_history(
         previous = await db.get(Run, previous_id)
         if previous is None or previous.status != "succeeded" or previous.user_id != actor.id:
             continue
-        if current_run.request_mode == "reference" and (
-            previous.request_mode == "design"
-            or (previous.outcome or {}).get("answer_mode") in ("design", "project_explanation")
-        ):
-            continue
         questions = [item.content for item in messages if item.role == "user"]
         answers = [item.content for item in messages if item.role == "assistant"]
         if not questions or len(answers) != 1:
