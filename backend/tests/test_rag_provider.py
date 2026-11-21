@@ -15,7 +15,7 @@ from partner_agent.runtime.rag_provider import (
 def test_build_messages_and_validate_allowed_citation():
     evidence = [{"evidence_id": "u1", "excerpt": "Python course"}]
     messages = build_messages("What course?", evidence)
-    assert "u1" in messages[1]["content"]
+    assert "[source_1]" in messages[1]["content"]
     result = validate_citations(
         {"answer": "Course", "citations": [{"evidence_id": "u1",
           "quote": "Python course"}]}, evidence
@@ -190,8 +190,9 @@ def test_large_project_preserves_conditions_and_whole_ranked_excerpts_before_his
     assert len(prepared.messages) == 2
     content = prepared.messages[-1]["content"]
     assert json.loads(content.split("Saved project conditions:\n")[1]) == project
-    for item in prepared.evidence:
-        assert f"[{item['evidence_id']}] {item['excerpt']}" in content
+    for alias, evidence_id in prepared.citation_aliases.items():
+        item = next(item for item in prepared.evidence if item["evidence_id"] == evidence_id)
+        assert f"[{alias}] {item['excerpt']}" in content
     assert "[source-19]" not in content
     assert len(evidence) == 20 and len(history) == 2
 
@@ -384,3 +385,18 @@ def test_developer_diagnostics_defaults_off_and_rejects_production():
         Settings(database_url="postgresql+psycopg://u:p@localhost/db",
                  environment="production", public_origin="https://example.com",
                  developer_diagnostics_enabled=True)
+
+
+@pytest.mark.parametrize("citation", [{"evidence_id": "source_1"}, "source_1", "[source_1]"])
+def test_ephemeral_source_handles_resolve_only_to_selected_authorized_evidence(citation):
+    prepared = prepare_request(
+        "Вопрос", [{"evidence_id": "actual-id", "excerpt": "Подлинный текст"}],
+    )
+    assert "[source_1]" in prepared.messages[-1]["content"]
+    assert "actual-id" not in prepared.messages[-1]["content"]
+    result = validate_citations({"answer": "Пересказ", "citations": [citation]}, prepared.evidence,
+                                prepared.citation_aliases)
+    assert result["citations"] == [{"evidence_id": "actual-id", "quote": "Подлинный текст"}]
+    with pytest.raises(ProviderError, match="provider_unauthorized_citation"):
+        validate_citations({"answer": "Чужой", "citations": ["source_2"]}, prepared.evidence,
+                           prepared.citation_aliases)
