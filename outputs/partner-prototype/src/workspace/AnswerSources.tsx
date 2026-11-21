@@ -33,6 +33,7 @@ function SourceFragment({ auth, runId, index, citation, onExpired }: {
     } catch (failure) { failed(failure); }
     finally { if (live.current) setBusy(false); }
   }
+  useEffect(() => { void open(); }, []);
   async function download(): Promise<void> {
     if (!source?.original_download_path) return;
     setBusy(true); setError('');

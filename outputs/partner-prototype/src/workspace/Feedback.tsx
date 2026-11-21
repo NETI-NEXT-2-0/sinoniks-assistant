@@ -26,7 +26,7 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
       if (!isRecord(raw) || !('feedback' in raw)) throw new ApiError(502, 'invalid_response');
       const value = raw.feedback === null ? null : entry(raw.feedback);
       if (live) { setSent(value); setLoaded(true); }
-    }).catch(failure => { if (live && failure instanceof ApiError && failure.status === 401) onExpired(); });
+    }).catch(failure => { if (!live) return; if (failure instanceof ApiError && failure.status === 401) onExpired(); else setLoaded(true); });
     return () => { live = false; };
   }, [auth, chatId, onExpired]);
   useEffect(() => { if (rating > 0 && !dialog.current?.open) dialog.current?.showModal(); }, [rating]);
@@ -35,7 +35,7 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
     setBusy(true); setError('');
     try {
       let raw: unknown;
-      try { raw = await auth.request(`/chats/${chatId}/feedback`, { method: 'POST', body: JSON.stringify({ id: id.current, run_id: runId, rating, comment }) }); }
+      try { raw = await auth.mutate(`/chats/${chatId}/feedback`, 'POST', { id: id.current, run_id: runId, rating, comment }); }
       catch (failure) {
         if (!(failure instanceof ApiError) || failure.code !== 'feedback_exists') throw failure;
         raw = await auth.request(`/chats/${chatId}/feedback`);

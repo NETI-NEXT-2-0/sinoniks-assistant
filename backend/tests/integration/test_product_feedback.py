@@ -8,7 +8,7 @@ from test_chat_data_plane import complete, new_chat, submit
 from test_chat_data_plane import plane as plane
 
 from partner_agent.infra.db import session_factory
-from partner_agent.infra.models_feedback import ProductFeedback
+from partner_agent.infra.models_stage2 import Admission
 
 pytestmark = pytest.mark.integration
 
@@ -39,7 +39,9 @@ async def test_feedback_is_explicit_private_idempotent_and_manager_visible(plane
     assert (
         await client.post(path, headers=headers, json={**body, "comment": "перезаписать"})
     ).status_code == 409
-    listing = (await admin.get("/api/v1/admin/feedback")).json()["items"]
+    admin_response = await admin.get("/api/v1/admin/feedback")
+    assert admin_response.headers["cache-control"] == "private, no-store"
+    listing = admin_response.json()["items"]
     row = next(x for x in listing if x["id"] == body["id"])
     assert row["rating"] == 4 and row["comment"] == body["comment"]
     assert set(row) == {"id", "rating", "comment", "author", "created_at"}
@@ -49,7 +51,10 @@ async def test_feedback_is_explicit_private_idempotent_and_manager_visible(plane
             len(
                 (
                     await db.scalars(
-                        select(ProductFeedback).where(ProductFeedback.chat_id == UUID(chat["id"]))
+                        select(Admission).where(
+                            Admission.chat_id == UUID(chat["id"]),
+                            Admission.operation == "product_feedback",
+                        )
                     )
                 ).all()
             )
