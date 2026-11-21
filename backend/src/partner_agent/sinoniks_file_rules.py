@@ -1,6 +1,7 @@
 import hashlib
 import json
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import zip_longest
 from typing import Literal
@@ -295,6 +296,15 @@ def _rules(buckets: dict[Profile, list[FileLane]]) -> list[list[FileLane]]:
     return result
 
 
+def has_unidentified_manual_users(flows: Iterable[FileFlow19]) -> bool:
+    return any(
+        len(flow.sides) != 2 or any(
+            not side.actor_ids and (side.manual is not False or side.usb is not False)
+            for side in flow.sides
+        ) for flow in flows
+    )
+
+
 def _user_counts(
     request: Requirements19, flows: list[FileFlow19], pulls: int, incomplete: bool,
 ) -> tuple[int | None, CountRange19 | None]:
@@ -303,15 +313,9 @@ def _user_counts(
     actors = {actor for flow in flows for side in flow.sides for actor in side.actor_ids}
     declared = request.manual_users
     lower = max(len(actors), declared.lower if declared else 0) + pulls
-    unnamed = any(
-        len(flow.sides) != 2 or any(
-            not side.actor_ids and (side.manual is not False or side.usb is not False)
-            for side in flow.sides
-        ) for flow in flows
-    )
     upper = None if incomplete else (
         declared.upper + pulls if declared and declared.upper is not None
-        else lower if declared is None and not unnamed else None
+        else lower if declared is None and not has_unidentified_manual_users(flows) else None
     )
     if upper == lower:
         return lower, None

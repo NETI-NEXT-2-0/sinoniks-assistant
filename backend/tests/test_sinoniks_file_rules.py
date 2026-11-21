@@ -2,6 +2,7 @@ from xml.etree import ElementTree
 
 from partner_agent.sinoniks_calculation import calculate_rules, solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
+from partner_agent.sinoniks_contract19_io import assess
 from partner_agent.sinoniks_export import scene_drawio
 from partner_agent.sinoniks_file_rules import calculate_file_rules
 from partner_agent.sinoniks_layout19 import layout19
@@ -48,6 +49,36 @@ def test_two_pulls_and_pushes_on_both_nodes_become_two_rules_and_two_users():
     result = calculate_file_rules(request, outside_network_id="office")
     assert result.minimum == 2 and result.file_users_count == 2
     assert [rule.direction for rule in result.rules] == ["forward", "forward"]
+    expert = export_result(request, session_id="test-u01")
+    assert expert["file_users_count"] == 2 and expert["file_users_range"] is None
+    assert [(rule["from"], rule["to"], rule["protocol"]) for rule in expert["rules"]] == [
+        ("office", "plant", {"office": "SFTP, PULL", "plant": "SFTP, PUSH"}),
+        ("plant", "office", {"office": "SFTP, PUSH", "plant": "SFTP, PULL"}),
+    ]
+
+
+def test_f04_manual_sftp_and_smb_push_need_one_known_user():
+    request = plan([files(
+        "programs",
+        side("office", manual=True, manual_protocol="SFTP", actor_ids=["operator"],
+             received_files_shared=None, checks=[
+                 {"kind": "name_mask"}, {"kind": "size"},
+                 {"kind": "icap", "icap_service": "antivirus"},
+             ]),
+        side("plant", automations=[automation("PUSH", "plant", "SMB")]),
+        sender_ids=["office-store"], receiver_ids=["plant-store"],
+    )])
+    assert assess(request).status == "ready_for_solver"
+    expert = export_result(request, session_id="test-f04")
+    assert expert["status"] == "completed"
+    assert expert["rules_count"] == expert["file_users_count"] == 1
+    rule, = expert["rules"]
+    assert (rule["from"], rule["to"], rule["mode"]) == ("office", "plant", "one-way")
+    assert rule["protocol"] == {"office": "SFTP, вручную", "plant": "SMB, PUSH"}
+    assert {check["kind"] for check in rule["checks_by_node"]["A"]} == {
+        "name_mask", "size", "icap",
+    }
+    assert rule["checks_by_node"]["B"] == []
 
 
 def test_covers_mixed_usb_and_icap_with_push_and_one_human():
@@ -123,6 +154,35 @@ def test_size_and_external_icap_apply_on_their_own_nodes_and_groups_stay_isolate
     assert result.minimum == 2 and result.file_users_count is None
     assert result.file_users_range is not None
     assert (result.file_users_range.lower, result.file_users_range.upper) == (2, 5)
+
+
+def test_u02_isolated_groups_are_separate_even_when_checks_are_identical():
+    office = side("office", manual=True)
+    plant = side("plant", manual=True, received_files_shared=False)
+    request = plan([
+        files("engineering", office, {**plant, "access_group": "engineering"}),
+        files("quality", office, {**plant, "access_group": "quality"}),
+    ])
+    expert = export_result(request, session_id="test-u02-isolated")
+    assert expert["rules_count"] == 2
+    assert expert["file_users_count"] is None and expert["file_users_range"] is None
+    assert {rule["directions"][0]["access_groups"]["plant"] for rule in expert["rules"]} == {
+        "engineering", "quality",
+    }
+
+
+def test_u02_common_access_keeps_independent_node_checks_in_one_rule():
+    request = plan([files(
+        "common", side("office", manual=True, checks=[{"kind": "size"}]),
+        side("plant", manual=True, checks=[{"kind": "icap", "icap_service": "antivirus"}]),
+    )], manual_users={"lower": 2, "upper": 5})
+    expert = export_result(request, session_id="test-u02-common")
+    assert expert["rules_count"] == 1
+    assert expert["file_users_count"] is None
+    assert expert["file_users_range"] == {"min": 2, "max": 5}
+    checks = expert["rules"][0]["checks_by_node"]
+    assert [check["kind"] for check in checks["A"]] == ["size"]
+    assert [check["kind"] for check in checks["B"]] == ["icap"]
 
 
 def test_unknown_methods_and_checks_never_become_a_certified_rule_count():

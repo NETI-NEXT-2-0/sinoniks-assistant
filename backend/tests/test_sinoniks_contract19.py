@@ -237,11 +237,18 @@ def test_manual_user_range_does_not_coerce_unknown_or_boolean_to_a_count(value):
 def test_unknown_manual_users_is_not_replaced_with_zero_or_a_rule_count():
     document = file_project()
     document["manual_users"] = None
+    document["flows"][0]["sides"][0].update(manual=True, manual_protocol="SFTP")
     request = Requirements19.model_validate(document)
     assert request.manual_users is None
     assert assess(request).rules_count is None
     assert any(issue.path == "/manual_users" and issue.kind == "optional"
                for issue in assess(request).issues)
+
+
+def test_automatic_file_exchange_does_not_ask_for_manual_users():
+    document = file_project()
+    document["manual_users"] = None
+    assert assess(Requirements19.model_validate(document)).status == "ready_for_solver"
 
 
 def test_ntp_does_not_ask_how_many_clients_receive_time():
