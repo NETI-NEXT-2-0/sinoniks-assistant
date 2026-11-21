@@ -64,12 +64,20 @@ def test_validate_rejects_unauthorized_citation():
 
 
 @pytest.mark.parametrize("quote", ["", " \n ", "The price is 900.", "the price is 100."])
-def test_citation_must_match_supplied_excerpt(quote):
-    with pytest.raises(ProviderError, match="provider_invalid_citation_quote"):
-        validate_citations(
-            {"answer": "Price", "citations": [{"evidence_id": "u1", "quote": quote}]},
-            [{"evidence_id": "u1", "excerpt": "The price is 100."}],
-        )
+def test_paraphrased_citation_displays_real_source_not_generated_quote(quote):
+    result = validate_citations(
+        {"answer": "Price", "citations": [{"evidence_id": "u1", "quote": quote}]},
+        [{"evidence_id": "u1", "excerpt": "The price is 100."}],
+    )
+    assert result["citations"] == [{"evidence_id": "u1", "quote": "The price is 100."}]
+
+
+def test_model_can_select_a_source_without_retyping_its_text():
+    result = validate_citations(
+        {"answer": "Пересказ", "citations": [{"evidence_id": "u1"}]},
+        [{"evidence_id": "u1", "excerpt": "Разрешённый фрагмент источника."}],
+    )
+    assert result["citations"][0]["quote"] == "Разрешённый фрагмент источника."
 
 
 def test_citation_allows_layout_whitespace_without_changing_its_words():

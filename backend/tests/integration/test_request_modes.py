@@ -366,8 +366,10 @@ async def test_reference_mode_cannot_save_an_adapter_proposal(plane, monkeypatch
     admitted = (await send(client, headers, chat, "reference")).json()
     assert (await execute_run(UUID(admitted["run_id"]), dispatch_generation=0))[
         "status"
-    ] == "failed"
+    ] == "succeeded"
     run = (await client.get(f"/api/v1/runs/{admitted['run_id']}")).json()
+    assert run["outcome"]["task_completed"] is False
+    assert run["outcome"]["response_status"] == "needs_clarification"
     assert run["outcome"]["code"] == (
         "provider_request_mode_violation" if guard == "provider" else "request_mode_violation"
     )

@@ -287,7 +287,7 @@ async def test_missing_usage_keeps_reservation_instead_of_refunding(corpus, monk
     [
         ("estimate", "0.01", 0, "provider_request_cap_exceeded", None),
         ("actual", "0.03", 1, "provider_request_cap_exceeded", 42000),
-        ("citation", "0.03", 1, "provider_invalid_citation_quote", 4000),
+        ("citation", "0.03", 1, None, 4000),
         ("json", "0.03", 1, "provider_invalid_rag_json", 4000),
         ("midnight", "0.03", 1, "provider_invalid_rag_json", 4000),
     ],
@@ -336,11 +336,19 @@ async def test_model_limit_and_rejected_usage(corpus, monkeypatch, scenario, cap
         admitted = await submit(client, headers, chat, text="Synthetic course")
         assert admitted.status_code == 202
         result = await execute_run(uuid.UUID(admitted.json()["run_id"]), dispatch_generation=0)
-        assert result["status"] == "failed" and calls == calls_expected
+        assert result["status"] == "succeeded" and calls == calls_expected
         snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
         outcome = snapshot["runs"][0]["outcome"]
-        assert outcome["code"] == code
-        assert not any(message["role"] == "assistant" for message in snapshot["messages"])
+        assistants = [message for message in snapshot["messages"] if message["role"] == "assistant"]
+        assert len(assistants) == 1
+        if code is None:
+            assert "code" not in outcome
+            assert "900" not in str(outcome["citations"])
+        else:
+            assert outcome["code"] == code and outcome["task_completed"] is False
+            assert outcome["response_status"] == "needs_clarification"
+            assert outcome["citations"] == []
+            assert "Synthetic course costs 100." not in assistants[0]["content"]
         async with session_factory()() as db:
             row = await db.scalar(select(ModelUsageDaily).where(ModelUsageDaily.model == name))
             if spent is None:
@@ -383,9 +391,11 @@ async def test_contest_spend_cap_rejects_before_transport(corpus, monkeypatch, c
     chat = await new_chat(client, headers)
     admitted = await submit(client, headers, chat, text="Synthetic course")
     run_id = admitted.json()["run_id"]
-    assert (await execute_run(uuid.UUID(run_id), dispatch_generation=0))["status"] == "failed"
+    assert (await execute_run(uuid.UUID(run_id), dispatch_generation=0))["status"] == "succeeded"
     outcome = (await client.get(f"/api/v1/runs/{run_id}")).json()["outcome"]
     assert outcome["code"] == f"provider_{cap_type}_cap_exceeded"
+    assert outcome["task_completed"] is False
+    assert outcome["response_status"] == "needs_clarification"
     assert outcome["provider_calls"] == 0
     async with session_factory()() as db:
         assert await db.scalar(select(ModelUsageDaily).where(ModelUsageDaily.model == name)) is None
