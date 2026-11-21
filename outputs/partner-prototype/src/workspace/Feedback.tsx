@@ -15,7 +15,7 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
   auth: AuthClient; chatId: string; runId: string; onExpired: () => void;
 }) {
   const [loaded, setLoaded] = useState(false), [sent, setSent] = useState<Entry | null>(null);
-  const [rating, setRating] = useState(0), [comment, setComment] = useState('');
+  const [directRating, setDirectRating] = useState<number | null>(null), [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [dismissed, setDismissed] = useState(false);
   const id = useRef(crypto.randomUUID()), dialog = useRef<HTMLDialogElement>(null);
@@ -29,13 +29,29 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
     }).catch(failure => { if (!live) return; if (failure instanceof ApiError && failure.status === 401) onExpired(); else setLoaded(true); });
     return () => { live = false; };
   }, [auth, chatId, onExpired]);
-  useEffect(() => { if (rating > 0 && !dialog.current?.open) dialog.current?.showModal(); }, [rating]);
-  function close() { if (!busy) { dialog.current?.close(); setRating(0); opener.current?.focus(); } }
-  async function send() {
+  function close() {
+    if (busy) return;
+    dialog.current?.close();
+    setError('');
+    opener.current?.focus();
+  }
+  function chooseRating(rating: number, button: HTMLButtonElement) {
+    if (busy || directRating !== null) return;
+    opener.current = button;
+    if (rating === 5) {
+      setError('');
+      dialog.current?.showModal();
+    } else {
+      setDirectRating(rating);
+      void send(rating, '');
+    }
+  }
+  async function send(rating: number, submittedComment: string) {
+    if (busy) return;
     setBusy(true); setError('');
     try {
       let raw: unknown;
-      try { raw = await auth.mutate(`/chats/${chatId}/feedback`, 'POST', { id: id.current, run_id: runId, rating, comment }); }
+      try { raw = await auth.mutate(`/chats/${chatId}/feedback`, 'POST', { id: id.current, run_id: runId, rating, comment: submittedComment }); }
       catch (failure) {
         if (!(failure instanceof ApiError) || failure.code !== 'feedback_exists') throw failure;
         raw = await auth.request(`/chats/${chatId}/feedback`);
@@ -44,23 +60,31 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
       setSent(entry(raw.feedback)); dialog.current?.close(); opener.current?.focus();
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 401) onExpired();
-      else setError('Отправка не подтверждена. Текст сохранён в этом окне — попробуйте ещё раз.');
+      else setError('Отправка не подтверждена. Попробуйте ещё раз.');
     } finally { setBusy(false); }
   }
   if (!loaded || dismissed) return null;
   if (sent) return <p className="feedback-thanks" role="status">Спасибо за отзыв · {sent.rating} из 5</p>;
   return <div className="feedback-prompt">
-    <span>Было полезно?</span><div className="feedback-stars" role="group" aria-label="Оценить помощь от 1 до 5">
-      {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" aria-label={`Оценить на ${n} из 5`} onClick={event => { opener.current = event.currentTarget; setRating(n); }}>☆</button>)}
-    </div><button type="button" className="feedback-later" onClick={() => setDismissed(true)}>Не сейчас</button>
-    <dialog ref={dialog} className="feedback-dialog" onCancel={event => { event.preventDefault(); close(); }}>
-      <form onSubmit={event => { event.preventDefault(); void send(); }}>
-        <header><h2>Что можно улучшить?</h2><button type="button" aria-label="Закрыть отзыв" disabled={busy} onClick={close}>×</button></header>
-        <div className="feedback-stars" role="group" aria-label="Ваша оценка">{[1, 2, 3, 4, 5].map(n => <button key={n} type="button" disabled={busy} aria-label={`${n} из 5`} aria-pressed={rating === n} onClick={() => setRating(n)}>{n <= rating ? '★' : '☆'}</button>)}</div>
+    <span>Было полезно?</span>
+    <div className="feedback-stars" role="group" aria-label="Оценить помощь от 1 до 5" aria-describedby={`feedback-notice-${chatId}`}>
+      {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" aria-label={`Оценить на ${n} из 5`} disabled={busy || directRating !== null} onClick={event => chooseRating(n, event.currentTarget)}>{directRating !== null && n <= directRating ? '★' : '☆'}</button>)}
+    </div>
+    <button type="button" className="feedback-later" disabled={busy} onClick={() => setDismissed(true)}>Не сейчас</button>
+    <span id={`feedback-notice-${chatId}`}>Администратор увидит оценку и ваш логин.</span>
+    {directRating !== null && (busy ? <span role="status">Отправляем оценку…</span> : error && <>
+      <span role="alert">{error}</span>
+      <button type="button" className="feedback-later" onClick={() => void send(directRating, '')}>Повторить отправку</button>
+    </>)}
+    <dialog ref={dialog} className="feedback-dialog" aria-labelledby={`feedback-title-${chatId}`} onCancel={event => { event.preventDefault(); close(); }}>
+      <form onSubmit={event => { event.preventDefault(); void send(5, comment); }}>
+        <header><h2 id={`feedback-title-${chatId}`}>Что можно улучшить?</h2><button type="button" aria-label="Закрыть отзыв" disabled={busy} onClick={close}>×</button></header>
+        <div className="feedback-stars" aria-label="Оценка 5 из 5">★★★★★</div>
         <label htmlFor={`feedback-${chatId}`}>Пожелание или комментарий <span>(необязательно)</span></label>
         <textarea autoFocus id={`feedback-${chatId}`} rows={4} maxLength={2000} value={comment} disabled={busy} onChange={event => setComment(event.target.value)} placeholder="Что было непонятно? Какой возможности не хватает?" />
         <p>Администратор увидит оценку, ваш логин и этот комментарий. Переписка не отправляется. Не указывайте пароли и конфиденциальные данные.</p>
-        {error && <p role="alert">{error}</p>}<footer><button type="button" disabled={busy} onClick={close}>Отмена</button><button className="feedback-submit" disabled={busy}>{busy ? 'Отправляем…' : 'Отправить отзыв'}</button></footer>
+        {error && <p role="alert">{error}</p>}
+        <footer><button type="button" disabled={busy} onClick={() => void send(5, '')}>Без комментария</button><button className="feedback-submit" disabled={busy}>{busy ? 'Отправляем…' : 'Отправить отзыв'}</button></footer>
       </form>
     </dialog>
   </div>;
