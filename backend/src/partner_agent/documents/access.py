@@ -3,7 +3,7 @@
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -19,6 +19,7 @@ from partner_agent.infra.models_documents import (
     DocumentGrant,
     DocumentGroupGrant,
 )
+from partner_agent.infra.settings import get_settings
 
 KnowledgeAction = Literal["answer", "original"]
 DocumentAction = Literal["answer", "original", "manage", "acl"]
@@ -56,7 +57,12 @@ def access_predicate(actor: User, action: KnowledgeAction) -> ColumnElement[bool
         Document.owner_id == actor.id,
         exists(select(User.id).where(User.id == actor.id, User.role.in_(MANAGER_ROLES))),
     )
-    return and_(active, or_(owner, grant, group_grant))
+    demo = and_(
+        literal(get_settings().demo_public_knowledge),
+        Document.scope == "knowledge", Document.active_version_id.is_not(None),
+        Document.deleted_at.is_(None),
+    )
+    return and_(active, or_(owner, grant, group_grant, demo))
 
 
 def document_access_allowed(
@@ -64,6 +70,9 @@ def document_access_allowed(
     group_allowed: bool = False,
 ) -> bool:
     allowed: set[str] = set()
+    if (get_settings().demo_public_knowledge and document.scope == "knowledge"
+            and document.active_version_id is not None and document.deleted_at is None):
+        allowed.update(("knowledge.answer", "knowledge.excerpt", "original.download"))
     if document.owner_id == actor.id and actor.role in MANAGER_ROLES:
         allowed.update((
             "knowledge.answer", "knowledge.excerpt", "original.download",
