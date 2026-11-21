@@ -58,10 +58,12 @@ async def bounded_response_body(response: httpx.Response) -> bytes:
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, code: str, *, usage: dict[str, int] | None = None) -> None:
+    def __init__(self, code: str, *, usage: dict[str, int] | None = None,
+                 diagnostics: dict[str, Any] | None = None) -> None:
         super().__init__(code)
         self.code = code
         self.usage = usage
+        self.diagnostics = diagnostics
 
 
 def normalize_usage(raw: Any) -> dict[str, int]:

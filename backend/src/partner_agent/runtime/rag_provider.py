@@ -24,6 +24,19 @@ from partner_agent.sinoniks_contract19 import Requirements19
 RAG_RESPONSE_MAX_CHARS = 128000
 
 
+def safe_validation_diagnostics(error: ValidationError) -> dict[str, Any]:
+    """Report schema paths/types only, never model-generated values or messages."""
+    items: list[dict[str, Any]] = []
+    for issue in error.errors(include_input=False, include_context=False, include_url=False)[:20]:
+        location = issue.get("loc", ())
+        path = [part if isinstance(part, int) else part[:64]
+                for part in location if isinstance(part, int)
+                or (isinstance(part, str) and part.isidentifier())]
+        items.append({"path": path[:12], "type": str(issue.get("type", "unknown"))[:64]})
+    return {"stage": "design_validation", "issues": items,
+            "issue_count": error.error_count()}
+
+
 def decode_model_json(text: str) -> dict[str, Any]:
     """Reject ambiguous/unpersistable responses before validating their meaning."""
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -440,7 +453,12 @@ async def answer_with_provider(
         code = (exc.code if isinstance(exc, ProviderError) else
                 "provider_invalid_design" if isinstance(exc, ValidationError)
                 else "provider_invalid_rag_json")
-        raise ProviderError(code, usage=normalize_usage(body.get("usage"))) from exc
+        diagnostics = (safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)
+                       else {"stage": "design_validation", "reason": "design_object_missing"}
+                       if code == "provider_invalid_design" else
+                       {"stage": "provider_response_validation", "reason": code})
+        raise ProviderError(code, usage=normalize_usage(body.get("usage")),
+                            diagnostics=diagnostics) from exc
     by_id = {item["evidence_id"]: item for item in evidence}
     for citation in validated["citations"]:
         source = by_id[citation["evidence_id"]]
