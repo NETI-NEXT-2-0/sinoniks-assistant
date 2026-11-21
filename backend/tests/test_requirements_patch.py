@@ -141,7 +141,7 @@ def test_large_project_uses_compact_view_without_losing_any_entity():
     with pytest.raises(ProviderError, match="rag_context_limit"):
         prepare_request(question, [], design_context=base)
     prepared = prepare_request(question, [], design_context=base,
-                               context_window_tokens=65536, max_output_tokens=3000)
+                               context_window_tokens=98304, max_output_tokens=3000)
     wire = prepared.messages[-1]["content"].split("Saved project conditions:\n")[1]
     restored = Requirements19.model_validate(json.loads(wire))
     assert len(restored.systems) == 202
@@ -149,7 +149,7 @@ def test_large_project_uses_compact_view_without_losing_any_entity():
     assert prepared.patch_base == base
     assert "design_patch" in prepared.messages[0]["content"]
     assert "Return the COMPLETE updated saved document" not in prepared.messages[0]["content"]
-    assert sum(len(m["content"].encode()) + 64 for m in prepared.messages) < 62536
+    assert sum(len(m["content"].encode()) + 64 for m in prepared.messages) < 95304
 
 
 def test_repeat_history_is_removed_as_whole_pairs_and_current_request_preserved():

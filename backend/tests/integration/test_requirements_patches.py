@@ -109,3 +109,43 @@ async def test_invalid_patch_does_not_save_partial_revision(plane, monkeypatch):
     assert run["outcome"]["task_completed"] is False
     latest = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
     assert latest == first
+
+
+async def test_server_only_edit_is_visible_and_does_not_claim_a_new_exchange(plane, monkeypatch):
+    client, headers, chat, base, branch, first = await arrange(plane, monkeypatch)
+    provider(monkeypatch, [{"op": "add", "collection": "systems", "id": "garage",
+                            "values": {"name": "Сервер сервиса", "network_id": "office"}}])
+    accepted = (await submit(client, headers, chat, text="Добавить сервер и обмен")).json()
+    await execute_run(UUID(accepted["run_id"]), dispatch_generation=0)
+    snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
+    answer = next(m["content"] for m in snapshot["messages"] if m["role"] == "assistant")
+    assert "Сервер сервиса" in answer and "Новые обмены не сохранены" in answer
+    outcome = next(r["outcome"] for r in snapshot["runs"] if r["id"] == accepted["run_id"])
+    assert len(outcome["design_changes"]["new_systems_without_exchange"]) == 1
+    latest = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
+    assert latest["input"]["flows"] == first["input"]["flows"]
+    scene = (await client.get(base + f"/{latest['id']}/diagram")).json()["scene"]
+    assert "Сервер сервиса" in json.dumps(scene, ensure_ascii=False)
+
+
+async def test_compound_edit_preserves_tcp_intent_until_direction_is_known(plane, monkeypatch):
+    client, headers, chat, base, branch, first = await arrange(plane, monkeypatch)
+    provider(monkeypatch, [
+        {"op": "add", "collection": "systems", "id": "garage",
+         "values": {"name": "Сервер сервиса", "network_id": "office"}},
+        {"op": "add", "collection": "flows", "id": "service-channel",
+         "values": {"kind": "data", "protocol": "TCP", "mode": None,
+                    "purpose": "Между сервером сервиса и компьютером цеха"}},
+    ])
+    accepted = (await submit(client, headers, chat, text="Добавить сервер с TCP-обменом")).json()
+    await execute_run(UUID(accepted["run_id"]), dispatch_generation=0)
+    latest = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
+    assert len(latest["input"]["flows"]) == 2
+    assert latest["input"]["flows"][0] == first["input"]["flows"][0]
+    assert latest["input"]["flows"][1]["protocol"] == "TCP"
+    assert latest["input"]["flows"][1]["sender_network_id"] is None
+    assert latest["questions"] and latest["status"] != "completed"
+    assert latest["result"]["confirmed_rules_count"] is None
+    snapshot = (await client.get(f"/api/v1/chats/{chat['id']}/snapshot")).json()
+    answer = next(m["content"] for m in snapshot["messages"] if m["role"] == "assistant")
+    assert "Уточните:" in answer and "TCP" in answer

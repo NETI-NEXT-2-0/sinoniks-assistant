@@ -13,6 +13,41 @@ from partner_agent.sinoniks_export import scene_drawio
 from partner_agent.sinoniks_layout19 import layout19
 
 
+def test_known_server_without_a_calculated_flow_remains_visible_without_fake_edges():
+    from test_sinoniks_contract19 import data_project
+    raw = data_project()
+    original = Requirements19.model_validate(raw)
+    original_scene = layout19(original, solve_project(original))
+    raw["systems"].append({"id": "garage", "name": "Сервер автомастерской",
+                           "network_id": "office"})
+    request = Requirements19.model_validate(raw)
+    scene = layout19(request, solve_project(request))
+    page = scene["pages"][0]
+    server = next(box for box in page["boxes"] if "автомастерской" in box["text"])
+    assert server["x"] < 400
+    assert "Обмен не рассчитан" in server["text"]
+    assert all(server["id"] not in (edge["source"], edge["target"]) for edge in page["edges"])
+    assert scene["rule_rows"] == original_scene["rule_rows"]
+    assert len(page["edges"]) == len(original_scene["pages"][0]["edges"])
+    assert "автомастерской" in scene_drawio(scene)
+
+
+def test_many_unconnected_devices_are_preserved_on_bounded_supplementary_pages():
+    from test_sinoniks_contract19 import data_project
+    raw = data_project()
+    raw["systems"] += [{"id": f"garage-{i}", "name": f"Дополнительный-{i}",
+                        "network_id": "office"} for i in range(40)]
+    request = Requirements19.model_validate(raw)
+    scene = layout19(request, solve_project(request))
+    text = scene_drawio(scene)
+    for i in range(40):
+        assert f"Дополнительный-{i}" in text
+    assert len(scene["pages"]) == 3
+    assert all(sum(box["id"].startswith("endpoint-") for box in page["boxes"]) <= 32
+               for page in scene["pages"])
+    assert all(not page["edges"] for page in scene["pages"][1:])
+
+
 def fixture(name):
     return json.loads((Path(__file__).parent / f"fixtures/network-{name}.json").read_text(
         encoding="utf-8",

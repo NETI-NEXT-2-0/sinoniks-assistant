@@ -324,6 +324,20 @@ def prepare_request(
             "to the captured revision, validates, calculates and saves a new revision. "
             "Example: design_patch={operations:[{op:'update',collection:'systems',"
             "id:'saved-system-id',values:{name:'Новое имя'}}]}."
+            " MULTI-PART REQUESTS: account for EVERY requested change before returning. "
+            "'Add a server and connect it over TCP' requires both a system and a NEW flow; "
+            "do not stop after adding the system or overwrite the unrelated UDP flow. "
+            "Incomplete exchange conditions are supported: save a data flow with protocol=TCP "
+            "and null unknown mode/port/purpose/direction; never discard the exchange because "
+            "some parameters are missing. The server asks about these unknowns. "
+            "If direction is ambiguous, do not guess sender/receiver roles: keep those fields "
+            "null/empty and record the explicitly named pair in the flow's purpose, "
+            "so the clarification preserves both intended endpoints. "
+            "A request to connect through Sinoniks means an exchange, not a bypass cable. "
+            "Check that operations cover every clause of the user's request."
+            " When an added device already exists in this project, reuse its saved ID "
+            "unless the user explicitly requests another distinct device. A repeated "
+            "'add and connect' request must finish the missing exchange, not duplicate the device."
         )
     if new_project:
         instruction += (
