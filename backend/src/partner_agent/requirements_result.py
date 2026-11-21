@@ -98,6 +98,11 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
         lines.append(
             f"{rule['id']}. {rule['description']}: {source} {direction} {target}. {detail}."
         )
+        for lane in rule.get("directions", []):
+            if lane["received_files_shared"] is False:
+                network_id = lane["to_network_id"]
+                group = lane["access_groups"].get(network_id) or "группа не уточнена"
+                lines.append(f"   Раздельный доступ ({networks[network_id]}): {group}.")
         for issue in rule.get("provisional_reasons", []):
             network = networks.get(issue["network_id"])
             scope = f" ({network})" if network else ""
@@ -133,7 +138,7 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
         manual_count = (
             str(manual["min"]) if manual["min"] == manual["max"] else
             f"{manual['min']}–{manual['max']}" if manual["max"] is not None else
-            f"не менее {manual['min']}"
+            f"не менее {manual['min']}" if manual["min"] else "неизвестно"
         )
         lines.append(f"Ручные пользователи: {manual_count}{people}.")
         lines.append(

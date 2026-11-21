@@ -33,10 +33,12 @@ def test_n01_file_methods_checks_users_and_visibility_are_not_invented():
     request = Requirements19.model_validate(raw)
     document = result_document(request, solve_project(request), session_id="synthetic-n01")
     assert document["confirmed_rules_count"] is None and document["file_users_count"] is None
+    assert document["rules_lower_bound"] == 1
     assert document["status"] in ("preliminary", "needs_clarification")
     fields = {issue.path for issue in assess(request).issues}
     assert "/flows/0/sides/0/manual" in fields and "/flows/0/sides/1/checks" in fields
     assert "/manual_users" in fields
+    assert any("с USB" in issue.message for issue in assess(request).issues)
     assert all(side.manual is None and side.checks is None for side in request.flows[0].sides)
     assert all(not field.endswith("/purpose") for field in fields)
 

@@ -71,6 +71,8 @@ class DisplayRule:
     primary_receivers: list[Endpoint] | None = None
     file_check_directions: list[dict[str, object]] | None = None
     file_check_summary: str = ""
+    file_access_directions: list[dict[str, object]] | None = None
+    file_access_summary: str = ""
 
     def table_row(self) -> dict[str, object]:
         return {
@@ -86,6 +88,8 @@ class DisplayRule:
             "two_way": self.two_way, "provisional": self.provisional,
             **({"file_check_directions": self.file_check_directions}
                if self.file_check_directions is not None else {}),
+            **({"file_access_directions": self.file_access_directions}
+               if self.file_access_directions is not None else {}),
         }
 
 
@@ -167,6 +171,12 @@ class LayoutContext:
                 summary = _check_summary(side.checks)
                 if summary:
                     check_lines.append(f"{network_names[side.network_id]}: {summary}")
+        restricted = [direction.destination for direction in rule.lanes
+                      if direction.destination.received_files_shared is False]
+        access_lines = [
+            f"{network_names[side.network_id]}: {side.access_group or 'группа не уточнена'}"
+            for side in restricted
+        ]
         return DisplayRule(
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),
             list(dict.fromkeys(receivers)), rule.direction == "both", description,
@@ -177,6 +187,8 @@ class LayoutContext:
             primary_senders=primary_senders, primary_receivers=primary_receivers,
             file_check_directions=rule.check_directions(),
             file_check_summary="; ".join(dict.fromkeys(check_lines)),
+            file_access_directions=rule.access_directions(),
+            file_access_summary="; ".join(dict.fromkeys(access_lines)),
         )
 
 
@@ -380,6 +392,8 @@ def _page(
             text += " · предварительно"
         if rule.file_check_summary:
             text += "\nПроверки файлов · " + rule.file_check_summary
+        if rule.file_access_summary:
+            text += "\nРаздельный доступ · " + rule.file_access_summary
         page.boxes.append(Box(f"rule-marker-{rule.number}", "", 26, top + 22, 12, 12,
                               "detail", COLORS[(rule.number - 1) % len(COLORS)], radius=2))
         top += _text(page, f"rule-{rule.number}", text, 48, top + 6, 1338,
@@ -509,6 +523,13 @@ def _unplaced_topology(request: Requirements19) -> list[Page]:
                         network_name = names[side.network_id]
                         top += _text(page, f"checks-{flow.id}-{side.network_id}",
                                      f"{network_name}: {summary}", 40, top, 1360)
+                    if side.received_files_shared is False and (
+                        flow.direction == "both" or side.network_id == flow.receiver_network_id
+                    ):
+                        group = side.access_group or "группа не уточнена"
+                        top += _text(page, f"access-{flow.id}-{side.network_id}",
+                                     f"Раздельный доступ · {names[side.network_id]}: {group}",
+                                     40, top, 1360)
         page.height = top + 26
         if offset:
             pages.append(page)
@@ -528,6 +549,9 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
         return {**scene, "placement_pending": True, "rule_rows": [],
                 "preview_file_checks": {
                     rule.id: rule.check_directions() for rule in result.files.rules
+                },
+                "preview_file_access": {
+                    rule.id: rule.access_directions() for rule in result.files.rules
                 },
                 "pages": [asdict(page) for page in _unplaced_topology(request)]}
     context = LayoutContext({system.id: system for system in request.systems}, placement)

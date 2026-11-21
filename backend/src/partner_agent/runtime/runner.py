@@ -89,6 +89,7 @@ async def execute_run(
         usage: dict[str, int] = {}
         actual_cost: float | None = None
         provider_started = False
+        project_parent = None
         try:
             async with asyncio.timeout(claim.remaining_seconds):
                 async with session_factory()() as db:
@@ -286,7 +287,7 @@ async def execute_run(
             if usage:
                 failure.update(usage=usage, estimated_cost_usd=actual_cost,
                                usage_complete=actual_cost is not None)
-            message = (recovery_message(str(code))
+            message = (recovery_message(str(code), has_project=project_parent is not None)
                        if isinstance(error, (ProviderError, TimeoutError))
                        or (isinstance(error, APIError) and code == "request_mode_violation")
                        else None)

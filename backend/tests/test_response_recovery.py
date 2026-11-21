@@ -26,3 +26,10 @@ def test_expected_provider_failures_have_plain_text_guidance(code):
 )
 def test_security_and_unknown_infrastructure_failures_are_not_masked(code):
     assert recovery_message(code) is None
+
+
+def test_invalid_first_design_has_creation_guidance():
+    new = recovery_message("provider_invalid_design", has_project=False)
+    edit = recovery_message("provider_invalid_design", has_project=True)
+    assert new and "первый проект" in new and "остались в чате" in new
+    assert edit and "изменение схемы" in edit
