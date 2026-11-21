@@ -2,6 +2,12 @@
 
 
 def recovery_message(code: str) -> str | None:
+    if code == "rag_context_limit":
+        return (
+            "Проект вместе с запросом превышает доступное окно модели. "
+            "Сохранённые условия не изменились. Отправьте короткую адресную правку "
+            "или откройте редактор проекта."
+        )
     if code in {"provider_request_cap_exceeded", "provider_daily_cap_exceeded"}:
         return (
             "Достигнут заданный лимит расходов. Сохранённый проект доступен. "

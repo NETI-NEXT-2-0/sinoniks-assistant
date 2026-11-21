@@ -425,6 +425,19 @@ def prepare_request(
         calculation = "\nSaved calculation snapshot:\n" + json.dumps(
             project_calculation, ensure_ascii=False, separators=(",", ":"),
         )
+        if not fits(messages_for([], [])) and isinstance(project_calculation.get("rules"), list):
+            # Full exported rules duplicate condition details already present
+            # in the compact project. Keep calculated counts, placement and
+            # every rule-to-flow link before falling back to conditions only.
+            summary = {**project_calculation, "rules": [
+                {key: rule[key] for key in (
+                    "id", "rule_id", "type", "flow_ids", "requirement_ids",
+                ) if key in rule}
+                for rule in project_calculation["rules"] if isinstance(rule, dict)
+            ]}
+            calculation = "\nSaved calculation snapshot:\n" + json.dumps(
+                summary, ensure_ascii=False, separators=(",", ":"),
+            )
         if not fits(messages_for([], [])):
             instruction = base_instruction
             calculation = ""

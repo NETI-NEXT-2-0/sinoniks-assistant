@@ -280,6 +280,10 @@ async def test_v3_provenance_modes_and_read_only_explanation(plane, monkeypatch,
     )
     assert response.status_code == 202, response.text
     result = await execute_run(UUID(response.json()["run_id"]), dispatch_generation=0)
-    assert result["status"] == ("succeeded" if kind == "explain" else "failed")
+    assert result["status"] == "succeeded"
+    if kind != "explain":
+        stored = (await client.get('/api/v1/runs/' + response.json()["run_id"])).json()
+        assert stored["outcome"]["task_completed"] is False
+        assert stored["outcome"]["response_status"] == "needs_clarification"
     latest = (await client.get(base + "/latest", params={"branch_id": branch})).json()["design"]
     assert latest == first

@@ -42,7 +42,7 @@ def compact_project(document: dict[str, Any]) -> dict[str, Any]:
     checks=null means unknown). Pydantic knows each field's actual default.
     """
     if document.get("schema_version") != 3:
-        return without_sources(document)
+        return dict(without_sources(document))
     model = Requirements19.model_validate(document)
     view = without_sources(model.model_dump(mode="json", exclude_defaults=True,
                                           exclude={"legacy"}))
@@ -58,6 +58,7 @@ def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
     touched: set[tuple[str, str | None]] = set()
     changed: dict[str, set[str]] = {}
     replaced_notes: set[str] = set()
+    changed_roots: set[str] = set()
     for edit in patch.operations:
         key = (edit.collection, edit.id)
         if key in touched:
@@ -68,6 +69,7 @@ def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
                     or not edit.values.keys() <= ROOT_FIELDS):
                 raise PatchError("Invalid root edit")
             result.update(deepcopy(edit.values))
+            changed_roots.update(edit.values)
             replaced_notes.update(edit.values.keys() & {"unknowns", "assumptions"})
             continue
         if edit.id is None or "id" in edit.values:
@@ -100,6 +102,8 @@ def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
         for note in original[name]:
             note = deepcopy(note)
             parts = note["path"].split("/")
+            if name == "assumptions" and len(parts) == 2 and parts[1] in changed_roots:
+                continue
             if len(parts) >= 3 and parts[1] in ("networks", "systems", "flows"):
                 rows = result[parts[1]]
                 index = next((n for n, row in enumerate(rows)
