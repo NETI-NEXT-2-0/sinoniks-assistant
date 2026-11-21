@@ -3,7 +3,13 @@ from dataclasses import asdict, dataclass
 
 from partner_agent.sinoniks_calculation import RuleCalculation
 from partner_agent.sinoniks_contract19 import Requirements19, System19
-from partner_agent.sinoniks_data_rules import RULE_LIMIT, DataPlacement, DataRule
+from partner_agent.sinoniks_data_rules import (
+    FIREWALL_ID,
+    RULE_LIMIT,
+    DataPlacement,
+    DataRule,
+    existing_firewall_details,
+)
 from partner_agent.sinoniks_file_rules import FileLane, FileRule
 from partner_agent.sinoniks_layout import (
     BACKGROUND,
@@ -178,14 +184,15 @@ def _endpoints(
     return cards, max(bottoms)
 
 
-def _equipment(page: Page, centre: int, count: int, bottom: int, names: tuple[str, str]) -> dict[
-    str, Box
-]:
+def _equipment(
+    page: Page, centre: int, count: int, bottom: int, names: tuple[str, str],
+    existing_firewall_name: str | None,
+) -> dict[str, Box]:
     height = count * 36 + 60
     top = centre - height // 2
     boxes = {
-        "firewall": Box("firewall", "", 496, top - 10, 47, height + 20,
-                        "firewall", "#354552", "#FFAB4D", radius=2),
+        FIREWALL_ID: Box(FIREWALL_ID, "", 496, top - 10, 47, height + 20,
+                         "firewall", "#354552", "#FFAB4D", radius=2),
         "node-A": Box("node-A", "Узел А", 666, top, 70, height,
                       "device", "#E8EDF0", "none", "#303E48", font_size=12),
         "core": Box("core", "Ядро", 756, top, 70, height,
@@ -202,7 +209,12 @@ def _equipment(page: Page, centre: int, count: int, bottom: int, names: tuple[st
             "appliance", "#FFFFFF", COLORS[0], BACKGROUND),
         *boxes.values(),
     ])
-    _text(page, "firewall-title", "МЭ", 496, top - 48, 64, color="#FFFFFF")
+    if existing_firewall_name:
+        label = (existing_firewall_name if len(existing_firewall_name) <= 28
+                 else existing_firewall_name[:27] + "…")
+        _text(page, "firewall-title", label, 388, top - 48, 256, color="#FFFFFF")
+    else:
+        _text(page, "firewall-title", "МЭ", 496, top - 48, 64, color="#FFFFFF")
     _text(page, "appliance-title", "СИНОНИКС", 653, top - 45, 242, color="#FFFFFF", size=16)
     for offset in range(20, height + 17, 21):
         page.boxes.extend([
@@ -239,6 +251,7 @@ def _segment(
 
 def _page(
     rules: list[DisplayRule], names: tuple[str, str], count_text: str,
+    existing_firewall_name: str | None,
 ) -> Page:
     start, end = rules[0].number, rules[-1].number
     page = Page(f"rules-{start}", f"Правила {start}–{end}")
@@ -253,7 +266,7 @@ def _page(
     usb_rules = [number for number, arms in branches.items() if any(item.usb for item in arms)]
     usb_top = centre + 152 + max(0, len(usb_rules) - 1) * 36
     bottom = max(card_bottom + 28, usb_top + (92 if usb else 0) + 24)
-    equipment = _equipment(page, centre, len(rules), bottom, names)
+    equipment = _equipment(page, centre, len(rules), bottom, names, existing_firewall_name)
     _text(page, "title", "Синоникс 1.9 · " + page.title, 26, 12, 1380,
           color="#FFFFFF", size=22)
     usb_box = None
@@ -270,7 +283,7 @@ def _page(
         left_arms = [received for endpoint, received in branches[rule.number].items()
                      if endpoint.side == "A" and not endpoint.usb]
         if left_arms:
-            _segment(page, rule, "wall", equipment["firewall"], equipment["node-A"],
+            _segment(page, rule, "wall", equipment[FIREWALL_ID], equipment["node-A"],
                      port, port, 590, any(left_arms), False)
         usb_arms = [received for endpoint, received in branches[rule.number].items()
                     if endpoint.usb]
@@ -297,7 +310,7 @@ def _page(
             uses = regular[endpoint]
             socket = box.y + box.height * (uses.index(rule.number) + 1) // (len(uses) + 1)
             left = endpoint.side == "A"
-            device = equipment["firewall" if left else "node-B"]
+            device = equipment[FIREWALL_ID if left else "node-B"]
             _segment(page, rule, f"arm-{index}", box, device, socket, port,
                      (398 + offset * 30) if left else (948 + offset * 30), received, True)
             short_protocol = {"Modbus TCP": "Modbus", "МЭК 104": "МЭК104"}.get(
@@ -363,11 +376,15 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
     names = (networks[placement.node_a_network_id], networks[placement.node_b_network_id])
     count = (f"Правил Синоникса: {result.minimum}" if result.minimum is not None else
              f"Предварительный расчёт · минимум {result.lower_bound}")
-    pages = [_page(rules[start:start + RULES_PER_PAGE], names, count)
-             for start in range(0, len(rules), RULES_PER_PAGE)]
+    pages = [
+        _page(rules[start:start + RULES_PER_PAGE], names, count, request.existing_firewall_name)
+        for start in range(0, len(rules), RULES_PER_PAGE)
+    ]
+    firewall = existing_firewall_details(request)
     return {
         "schema_version": 1, "design_id": request.id, "background": BACKGROUND,
         "font_family": "Open Sans", "profile": "calculated-sinoniks-19",
         "rule_rows": [rule.table_row() for rule in rules],
         "pages": [asdict(page) for page in pages],
+        **({"firewall": firewall} if firewall else {}),
     }
