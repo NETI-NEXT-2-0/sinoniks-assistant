@@ -6,6 +6,7 @@ from typing import Any
 from partner_agent.project_readiness import annotate_readiness, readiness_report, readiness_text
 from partner_agent.sinoniks_calculation import solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
+from partner_agent.sinoniks_data_rules import known_protected_network
 from partner_agent.sinoniks_export import diagram_artifacts
 from partner_agent.sinoniks_layout19 import diagram_unavailability19, layout19
 from partner_agent.sinoniks_result_export import FILE_ISSUE_LABELS, result_document
@@ -13,6 +14,7 @@ from partner_agent.sinoniks_result_export import FILE_ISSUE_LABELS, result_docum
 ISSUE_LABELS = {
     "protected_side_unresolved": "Не определена защищаемая сторона",
     "placement_unresolved": "Не определено размещение оборудования",
+    "ntp_placement_unverified": "Размещение получателя NTP ещё не проверено",
     "flows_unknown": "Не описаны потоки",
     "network_direction_unknown": "Не указано направление обмена",
     "systems_unknown": "Не указаны системы отправления или получения",
@@ -54,8 +56,9 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
             )
     else:
         lines.append("Размещение пока не определено. Проверьте условия сетей.")
-        if request.protected_network_id is not None:
-            protected_name = networks[request.protected_network_id]
+        protected_network = known_protected_network(request)
+        if protected_network is not None:
+            protected_name = networks[protected_network]
             lines.append(f"Защищаемая сторона по условиям: {protected_name}.")
     if result.get("capacity_exceeded"):
         lines.append("Одного ПАК недостаточно: нижняя оценка превышает 256 правил.")
@@ -84,7 +87,8 @@ def explanation19(request: Requirements19, result: dict[str, Any]) -> str:
             if rule.get("application") == "ntp" and not receiver_names:
                 receiver_names = "получатели времени защищаемой сети"
             detail = (
-                f"{sender_names} {direction} {receiver_names}; "
+                f"{sender_names or 'отправители не уточнены'} {direction} "
+                f"{receiver_names or 'получатели не уточнены'}; "
                 f"{rule.get('protocol') or 'протокол не уточнён'}, "
                 f"порт {rule.get('port') if rule.get('port') is not None else 'не задан'}"
             )

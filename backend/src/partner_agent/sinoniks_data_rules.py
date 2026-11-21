@@ -49,6 +49,7 @@ class DataRule:
     requirement_ids: set[str] = field(default_factory=set)
     purposes: set[str] = field(default_factory=set)
     sources: dict[tuple[str, str, int], SourceReference] = field(default_factory=dict)
+    provisional: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -60,6 +61,7 @@ class DataRule:
             "flow_ids": sorted(self.flow_ids), "requirement_ids": sorted(self.requirement_ids),
             "purposes": sorted(self.purposes),
             "sources": [self.sources[key].model_dump(mode="json") for key in sorted(self.sources)],
+            **({"provisional": True} if self.provisional else {}),
         }
 
 
@@ -99,18 +101,25 @@ def place_data_exchange(
     return DataPlacement(protected, outer, protected, assumed_protected_side=assumed)
 
 
+def known_protected_network(request: Requirements19) -> str | None:
+    if request.protected_network_id:
+        return request.protected_network_id
+    closed = [network.id for network in request.networks if network.trust == "closed"]
+    return closed[0] if len(closed) == 1 else None
+
+
 def data_flow_issue(flow: DataFlow19, placement: DataPlacement | None) -> DataIssue | None:
     if flow.sender_network_id is None or flow.receiver_network_id is None:
         return DataIssue("direction", "network_direction_unknown", flow.id)
-    if not flow.sender_ids or (not flow.receiver_ids and flow.application != "ntp"):
-        return DataIssue("endpoints", "systems_unknown", flow.id)
     if flow.application == "ntp":
-        if placement is None or flow.receiver_network_id != placement.protected_network_id:
+        if placement is not None and flow.receiver_network_id != placement.protected_network_id:
             return DataIssue("direction", "ntp_requires_protected_destination", flow.id)
-        if len(flow.sender_ids) != 1:
+        if len(flow.sender_ids) > 1:
             return DataIssue("sender_ids", "ntp_requires_one_time_source", flow.id)
         if flow.mode == "two-way" or flow.protocol not in (None, "UDP"):
             return DataIssue("mode", "ntp_requires_one_way_udp", flow.id)
+        if placement is None:
+            return DataIssue("direction", "ntp_placement_unverified", flow.id)
     elif flow.mode == "one-way" and flow.protocol in INDUSTRIAL_PROTOCOLS:
         return DataIssue("mode", "industrial_protocol_requires_two_way", flow.id)
     elif flow.mode is None and flow.protocol not in INDUSTRIAL_PROTOCOLS:
@@ -122,7 +131,7 @@ def calculate_data_rules(
     request: Requirements19, *, protected_network_id: str | None = None,
 ) -> DataCalculation:
     placement = place_data_exchange(request, protected_network_id)
-    declared_side = protected_network_id or request.protected_network_id
+    declared_side = protected_network_id or known_protected_network(request)
     issues = [] if placement else [DataIssue(
         "networks", "placement_unresolved" if declared_side else "protected_side_unresolved",
     )]
@@ -141,26 +150,39 @@ def calculate_data_rules(
         issue = data_flow_issue(flow, placement)
         if issue is not None:
             issues.append(issue)
-            continue
+            if issue.reason != "ntp_placement_unverified":
+                continue
         if not unassigned.isdisjoint((*flow.sender_ids, *flow.receiver_ids)):
             issues.append(DataIssue("endpoints", "system_network_unknown", flow.id))
             continue
         assert flow.sender_network_id is not None and flow.receiver_network_id is not None
         ntp = flow.application == "ntp"
+        endpoint_unknown = not flow.sender_ids or (not flow.receiver_ids and not ntp)
+        if endpoint_unknown:
+            issues.append(DataIssue("endpoints", "systems_unknown", flow.id))
+            if not ntp and flow.protocol is None:
+                continue
         mode: Mode = "one-way" if ntp else flow.mode or "two-way"
         protocol: Protocol | None = "UDP" if ntp else flow.protocol
         if protocol is None:
             issues.append(DataIssue("protocol", "protocol_unknown", flow.id))
-        targets = [None] if ntp else flow.receiver_ids
+        targets: list[str | None] = [None] if ntp or not flow.receiver_ids else [
+            *flow.receiver_ids,
+        ]
         for target in targets:
             endpoints = tuple(sorted(flow.sender_ids)) if ntp else (target,)
             group = (flow.application, flow.sender_network_id, flow.receiver_network_id,
                      endpoints, mode, flow.policy)
             known_port = protocol is not None and flow.destination_port is not None
-            key = (*group, protocol, flow.destination_port, None if known_port else flow.id)
-            coarse_groups.setdefault(group, []).append(known_port)
-            if protocol is not None and flow.destination_port is not None:
-                certain.setdefault(group, set()).add((protocol, flow.destination_port))
+            key: tuple[object, ...] = (
+                *group, protocol, flow.destination_port, None if known_port else flow.id,
+            )
+            if not endpoint_unknown:
+                coarse_groups.setdefault(group, []).append(known_port)
+                if protocol is not None and flow.destination_port is not None:
+                    certain.setdefault(group, set()).add((protocol, flow.destination_port))
+            else:
+                key = (*key, "unbound", flow.id)
             if key not in grouped:
                 identity = json.dumps(key, ensure_ascii=False, separators=(",", ":"))
                 identifier = hashlib.sha256(identity.encode()).hexdigest()[:24]
@@ -169,6 +191,7 @@ def calculate_data_rules(
                     flow.receiver_network_id, mode, protocol, flow.destination_port, flow.policy,
                 )
             rule = grouped[key]
+            rule.provisional |= endpoint_unknown or issue is not None
             rule.sender_ids.update(flow.sender_ids)
             rule.receiver_ids.update(flow.receiver_ids if target is None else [target])
             rule.flow_ids.add(flow.id)
@@ -182,7 +205,9 @@ def calculate_data_rules(
     if ambiguous:
         issues.append(DataIssue("rules", "unknown_protocol_or_port_prevents_grouping"))
     rules = sorted(grouped.values(), key=lambda rule: rule.id)
-    lower_bound = sum(max(1, len(certain.get(key, ()))) for key in coarse_groups)
+    lower_bound = max(
+        int(bool(rules)), sum(max(1, len(certain.get(key, ()))) for key in coarse_groups),
+    )
     minimum = len(rules) if not issues else None
     if lower_bound > RULE_LIMIT:
         issues.append(DataIssue("rules", "single_appliance_capacity_exceeded"))

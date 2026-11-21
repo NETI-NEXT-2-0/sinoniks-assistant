@@ -79,6 +79,7 @@ def test_installed_firewall_is_named_once_at_the_existing_boundary():
 def test_preview_displays_known_systems_before_any_rule_can_be_calculated():
     document = data_project()
     document["flows"][0]["receiver_ids"] = []
+    document["flows"][0]["mode"] = None
     request = Requirements19.model_validate(document)
     result, artifacts = result_artifacts19(request, session_id="early-preview")
     assert result["rules_count"] == 0 and result["confirmed_rules_count"] is None
