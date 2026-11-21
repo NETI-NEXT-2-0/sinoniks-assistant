@@ -1,11 +1,9 @@
 import { product } from './product';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError, AuthClient, errorMessage, type User } from './api/client';
-import { mountGlass } from './glass';
 import { Icon, Brand } from './ui';
 import { Workspace } from './workspace/Workspace';
-import { mountVideoBackdrop } from './scene';
 import './style.css';
 import './themes.css';
 import './brand.css';
@@ -13,13 +11,6 @@ import './auth.css';
 import { EntryPage } from './entry/EntryPage';
 import './entry/entry.css';
 
-const themes = [
-  { id: 'standard', name: 'Стандартная', caption: 'Чистый фон. Чёткий фокус.' },
-  { id: 'dark', name: 'Тёмная', caption: 'Графит и оранжевые акценты.' },
-  { id: 'glass', name: 'Liquid Glass', caption: 'Свет, глубина и преломление.' },
-  { id: 'mixed', name: 'Смешанная', caption: 'Стекло там, где оно нужно.' },
-] as const;
-type Theme = typeof themes[number]['id'];
 type SessionState = { kind: 'loading' } | { kind: 'unavailable'; error: unknown }
   | { kind: 'signed-out'; notice?: string } | { kind: 'signed-in'; user: User };
 document.title = `${product.name} — рабочее пространство`;
@@ -74,7 +65,7 @@ function EntryAuth({ notice, onLogin }: { notice?: string; onLogin: (user: User)
   return <EntryPage onRegister={auth.selfRegistrationEnabled ? () => choose('register') : undefined}
     onLogin={() => choose('login')} busy={pending}>
     <section className="auth-card" aria-labelledby="login-title" aria-busy={pending}>
-    <span className="auth-mark" aria-hidden="true"><Icon name="message" /></span>
+
     <h2 id="login-title" tabIndex={-1} ref={heading}>{registering ? 'Создайте аккаунт' : 'Войдите в команду'}</h2>
     <p className="auth-description">{registering ? 'Выберите логин без пробелов и пароль от 12 символов.' : 'Используйте учётную запись вашей команды.'}</p>
     {!registering && notice && !error && <p className="auth-notice" role="status">{notice}</p>}
@@ -106,56 +97,9 @@ function EntryAuth({ notice, onLogin }: { notice?: string; onLogin: (user: User)
   </EntryPage>;
 }
 
-function Appearance({ theme, selectTheme, close }: { theme: Theme; selectTheme: (theme: Theme) => void; close: () => void }) {
-  const panel = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    panel.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
-  }, []);
-  function keydown(event: KeyboardEvent<HTMLElement>): void {
-    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
-    if (event.key !== 'Tab') return;
-    const elements = [...(panel.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])].filter((element) => element.tabIndex >= 0);
-    const first = elements[0], last = elements.at(-1);
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-  }
-  function radioKey(event: KeyboardEvent<HTMLButtonElement>): void {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const index = themes.findIndex((item) => item.id === theme);
-    const next = event.key === 'Home' ? 0 : event.key === 'End' ? themes.length - 1
-      : (index + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1) + themes.length) % themes.length;
-    const selected = themes[next].id;
-    selectTheme(selected);
-    panel.current?.querySelector<HTMLElement>(`[data-theme-choice="${selected}"]`)?.focus();
-  }
-  return <div className="appearance-overlay" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
-    <section ref={panel} className="appearance-panel" role="dialog" aria-modal="true" aria-labelledby="appearance-title" onKeyDown={keydown}>
-      <header className="appearance-heading"><div><span className="appearance-kicker">ВАШЕ ПРОСТРАНСТВО</span><h2 id="appearance-title">Оформление</h2></div><button className="appearance-close icon-button" aria-label="Закрыть настройки оформления" onClick={close}><Icon name="close" /></button></header>
-      <p className="appearance-description">Выберите тему рабочего пространства.</p>
-      <div className="theme-options" role="radiogroup" aria-label="Тема интерфейса">
-        {themes.map((item) => <button key={item.id} className={`theme-option ${theme === item.id ? 'chosen' : ''}`} data-theme-choice={item.id} role="radio" aria-label={item.name} aria-checked={theme === item.id} tabIndex={theme === item.id ? 0 : -1} onClick={() => selectTheme(item.id)} onKeyDown={radioKey}>
-          <span className={`theme-preview preview-${item.id}`} aria-hidden="true"><span className="preview-sidebar"><i /><i /><i /></span><span className="preview-content"><i className="preview-bubble" /><i className="preview-line" /><i className="preview-line short" /><i className="preview-input" /></span></span>
-          <span className="theme-option-label">{item.name}<span className="theme-check"><Icon name="check" /></span></span><span className="theme-caption">{item.caption}</span>
-        </button>)}
-      </div>
-      <footer className="appearance-footer"><span>Выбор сохраняется на этом устройстве</span><button className="appearance-done" onClick={close}>Готово <Icon name="check" /></button></footer>
-    </section>
-  </div>;
-}
-
 function App() {
   const [session, setSession] = useState<SessionState>({ kind: 'loading' });
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const saved = localStorage.getItem('partner-theme');
-      if (themes.some((item) => item.id === saved)) return saved as Theme;
-    } catch { /* Storage is optional and never contains authentication state. */ }
-    return 'mixed';
-  });
-  const [appearance, setAppearance] = useState(false);
+  const appearance = false;
   const [menu, setMenu] = useState(false);
   const [mobile, setMobile] = useState(() => matchMedia('(max-width:760px)').matches);
   const menuTrigger = useRef<HTMLButtonElement>(null);
@@ -163,21 +107,11 @@ function App() {
   const [logoutPending, setLogoutPending] = useState(false);
   const [sessionError, setSessionError] = useState<{ error: unknown; action: 'logout' | 'session' } | null>(null);
   const epoch = useRef(0);
-  const backdrop = useRef<ReturnType<typeof mountVideoBackdrop> | null>(null);
   const refreshBusy = useRef(false);
   const logoutActive = useRef(false);
   const user = session.kind === 'signed-in' ? session.user : null;
 
-  useEffect(() => {
-    backdrop.current = mountVideoBackdrop();
-    return () => { backdrop.current?.dispose(); backdrop.current = null; };
-  }, []);
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    backdrop.current?.sync(theme === 'glass');
-    try { localStorage.setItem('partner-theme', theme); } catch { /* Optional preference only. */ }
-  }, [theme]);
-  useEffect(() => mountGlass(theme), [theme, appearance, session.kind]);
+  useEffect(() => { document.documentElement.dataset.theme = 'dark'; }, []);
 
   const initialize = useCallback(async (notice?: string): Promise<void> => {
     const generation = ++epoch.current;
@@ -256,8 +190,9 @@ function App() {
   }
 
   return <>
+    <a className="skip-link" href="#main-content">К основному содержимому</a>
     {user ? <Workspace key={user.id} user={user} auth={auth} appearance={appearance}
-      openAppearance={() => setAppearance(true)} logout={logout} logoutPending={logoutPending}
+      openAppearance={() => { /* Dark theme is fixed for this version. */ }} logout={logout} logoutPending={logoutPending}
       sessionError={sessionError} onExpired={expireSession} /> : <div className={`layout auth-layout public-entry ${menu ? 'menu-open' : ''}`}>
       <aside className="sidebar" aria-label="Панель чатов" inert={appearance || (mobile && !menu) || undefined} aria-hidden={mobile && !menu || undefined} onKeyDown={(event) => {
         if (!mobile || !menu || event.key !== 'Tab') return;
@@ -274,16 +209,15 @@ function App() {
         <div className="sidebar-bottom"><p className="prototype-label">Прототип для хакатона<br /><span>{product.disclaimer}</span></p><div className="profile"><div className="avatar" aria-hidden="true">P</div><div className="profile-name">{product.name}<span>Личное пространство</span></div></div></div>
       </aside>
       <button className="scrim" aria-label="Закрыть меню" onClick={() => setMenu(false)} tabIndex={menu ? 0 : -1} />
-      <main className="main" inert={appearance || (mobile && menu) || undefined}>
-        <header className="header"><div className="header-left"><Brand /><span className="entry-header-caption">Ассистент инженера</span></div><div className="header-right"><button className="appearance-button" aria-label="Настройки оформления" onClick={() => setAppearance(true)}><Icon name="sun" /><span>Оформление</span></button></div></header>
+      <main id="main-content" tabIndex={-1} className="main" inert={appearance || (mobile && menu) || undefined}>
+        <header className="header"><div className="header-left"><Brand /><span className="entry-header-caption">Ассистент инженера</span></div></header>
         <div className="conversation auth-conversation">
           {session.kind === 'loading' && <EntryPage><section className="auth-card loading-card" role="status"><span className="auth-spinner" aria-hidden="true" /><h2>Проверяем сессию…</h2><p className="auth-description">Подключаемся к рабочему пространству.</p></section></EntryPage>}
-          {session.kind === 'unavailable' && <EntryPage><section className="auth-card unavailable-card"><span className="auth-mark" aria-hidden="true"><Icon name="message" /></span><h2>Не удалось подключиться</h2><ErrorNotice error={session.error} action="session" /><button className="login-submit" onClick={() => { void initialize(); }}>Повторить подключение</button></section></EntryPage>}
+          {session.kind === 'unavailable' && <EntryPage><section className="auth-card unavailable-card"><h2>Не удалось подключиться</h2><ErrorNotice error={session.error} action="session" /><button className="login-submit" onClick={() => { void initialize(); }}>Повторить подключение</button></section></EntryPage>}
           {session.kind === 'signed-out' && <EntryAuth notice={session.notice} onLogin={(current) => { ++epoch.current; setSessionError(null); setSession({ kind: 'signed-in', user: current }); }} />}
         </div><p id="chat-signin-hint" className="visually-hidden">Войдите, чтобы открыть чаты.</p>
       </main>
     </div>}
-    {appearance && <Appearance theme={theme} selectTheme={setTheme} close={() => setAppearance(false)} />}
   </>;
 }
 

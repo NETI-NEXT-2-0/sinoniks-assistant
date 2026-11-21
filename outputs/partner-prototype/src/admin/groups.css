@@ -1,1 +1,16 @@
-.admin-id{display:block;font-size:9px;line-height:1.5;font-weight:400;color:var(--secondary);overflow-wrap:anywhere;margin-top:4px}.admin-section{border-top:1px solid var(--stroke);padding:20px 0}.admin-section h4{font-size:15px}.admin-section>p,.admin-member-list>p{font-size:11px;line-height:1.7;color:var(--secondary);margin:7px 0 12px}.admin-add{display:flex;align-items:end;gap:8px;margin:15px 0}.admin-add label{display:flex;flex:1;min-width:0;flex-direction:column;gap:6px;font-size:11px;font-weight:600}.admin-add select,.admin-add input{min-width:0;width:100%;min-height:36px;border:1px solid var(--stroke);border-radius:8px;padding:8px 10px;color:var(--ink);background:var(--page);font:inherit}.admin-member{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid var(--stroke);font-size:11px;overflow-wrap:anywhere}.admin-member span{min-width:0}.admin-member small{display:block;color:var(--secondary);font-size:9px;margin-top:4px}.admin-group-list{display:grid;gap:4px;margin-top:12px}.admin-group-list .knowledge-doc{border-color:var(--stroke)}@media(max-width:760px){.admin-add{align-items:stretch;flex-direction:column}.admin-add button{align-self:flex-start}.admin-member{align-items:flex-start}}
+.admin-id{display:block;font-size:12px;line-height:1.5;font-weight:400;color:var(--secondary);overflow-wrap:anywhere;margin-top:4px}.admin-section{border-top:1px solid var(--stroke);padding:20px 0}.admin-section h4{font-size:15px}.admin-section>p,.admin-member-list>p{font-size:12px;line-height:1.7;color:var(--secondary);margin:7px 0 12px}.admin-add{display:flex;align-items:end;gap:8px;margin:15px 0}.admin-add label{display:flex;flex:1;min-width:0;flex-direction:column;gap:6px;font-size:12px;font-weight:600}.admin-add select,.admin-add input{min-width:0;width:100%;min-height:36px;border:1px solid var(--stroke);border-radius:8px;padding:8px 10px;color:var(--ink);background:var(--page);font:inherit}.admin-member{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 0;border-top:1px solid var(--stroke);font-size:12px;overflow-wrap:anywhere}.admin-member span{min-width:0}.admin-member small{display:block;color:var(--secondary);font-size:12px;margin-top:4px}.admin-group-list{display:grid;gap:4px;margin-top:12px}.admin-group-list .knowledge-doc{border-color:var(--stroke)}@media(max-width:760px){.admin-add{align-items:stretch;flex-direction:column}.admin-add button{align-self:flex-start}.admin-member{align-items:flex-start}}
+
+/* Administrative lists use rows, consistent fields and readable identifiers. */
+.admin-id { font-size: 12px; line-height: 1.6; margin-top: 8px; }
+.admin-section { padding: 24px 0; }
+.admin-section h4 { font-size: 18px; margin: 0; }
+.admin-section>p, .admin-member-list>p { font-size: 14px; line-height: 1.65; margin: 8px 0 16px; }
+.admin-add { gap: 12px; margin: 16px 0; }
+.admin-add label { font-size: 14px; gap: 8px; }
+.admin-add select, .admin-add input { min-height: 44px; padding: 12px; border-radius: 8px; font-size: 14px; }
+.admin-member { padding: 16px 0; gap: 16px; font-size: 14px; }
+.admin-member small { font-size: 12px; margin-top: 8px; }
+.admin-group-list { gap: 8px; margin-top: 16px; }
+@media (max-width: 760px) { .admin-add select, .admin-add input { font-size: 16px; } .admin-add button { align-self: stretch; } }
+
+.knowledge-panel .knowledge-document-head h3 { font-size: 24px; line-height: 1.3; }

@@ -13,7 +13,7 @@
 .design-panel button:disabled{opacity:.5;cursor:default}
 .design-panel button[type=submit]{background:var(--accent);color:#242424;border-color:var(--accent)}
 .design-content fieldset>button{margin-top:12px}.design-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
-.design-error{max-width:1100px;margin:0 auto 18px;border-left:3px solid #b7543f;padding:12px;font-size:13px;line-height:1.6}
+.design-error{max-width:1100px;margin:0 auto 18px;border:1px solid #b7543f;padding:12px;font-size:13px;line-height:1.6}
 .design-error button{margin-left:10px}.design-result{border-top:1px solid var(--stroke);padding-top:20px}
 .design-result h3{font-size:18px}.design-result p,.design-result li{font-size:13px;line-height:1.7;margin-top:8px}
 .design-path{display:flex;list-style:none;padding:0;gap:0;overflow-x:auto;margin:16px 0}
@@ -34,3 +34,37 @@
 .requirements-panel .design-fields input,
 .requirements-panel .design-fields select:not([multiple]) { min-height: 40px; }
 .requirements-panel .design-fields select[multiple] { min-height: 84px; }
+
+/* Requirements and result panels keep their existing model and exports. */
+.design-header { padding: 24px 32px; background: var(--panel); }
+.design-header h2 { font-size: 24px; }
+.design-header p { font-size: 14px; line-height: 1.65; }
+.design-content { padding: 32px; overscroll-behavior: contain; }
+.design-content form, .design-result { max-width: 1160px; margin-bottom: 32px; }
+.design-content fieldset { padding: 24px; margin-bottom: 24px; border-radius: 12px; }
+.design-content legend { font-size: 16px; padding-inline: 8px; }
+.design-fields { gap: 16px; }
+.design-fields label { font-size: 14px; gap: 8px; line-height: 1.6; }
+.design-fields :is(input,select) { min-height: 44px; padding: 12px; background: var(--panel); border-radius: 8px; }
+.design-panel button { min-height: 44px; padding: 12px 16px; font-size: 14px; border-radius: 8px; }
+.design-panel button:hover { background: var(--raised); }
+.design-panel button[type=submit] { color: var(--accent-ink); }
+.design-panel button[type=submit]:hover { background: var(--hover); }
+.design-actions { gap: 8px; margin-block: 24px; }
+.design-error { padding: 16px; font-size: 14px; border: 1px solid #b77665; border-radius: 8px; color: #ffb4a2; background: #392b29; }
+.design-result { padding-top: 24px; }
+.design-result h3 { font-size: 20px; }
+.design-result p, .design-result li { font-size: 14px; line-height: 1.7; }
+.design-table { margin-block: 24px; border-radius: 8px; }
+.design-table table { font-size: 14px; }
+.design-table :is(th,td) { padding: 12px 16px; }
+.design-result summary { font-size: 14px; min-height: 44px; padding-block: 12px; }
+.design-chat-card { padding: 24px 0; border: 0; border-top: 1px solid var(--stroke); border-radius: 0; }
+.design-chat-card p { font-size: 14px; }
+.design-chat-card button { min-height: 44px; padding: 12px; font-size: 14px; }
+@media (max-width: 760px) {
+ .design-header { padding: 16px; flex-wrap: wrap; }
+ .design-content { padding: 24px 16px; }
+ .design-content fieldset { padding: 16px; }
+ .design-fields :is(input,select) { font-size: 16px; }
+}

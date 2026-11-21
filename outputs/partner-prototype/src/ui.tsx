@@ -25,8 +25,8 @@ export function Icon({ name }: { name: keyof typeof icons }) {
 export function Brand() {
   return <div className="brand" aria-label={product.name}>
     {product.logoLight ? <>
-      <img className="partner-logo logo-light" src={product.logoLight} alt={product.partnerName} />
-      <img className="partner-logo logo-dark" src={product.logoDark || product.logoLight} alt={product.partnerName} />
+      <img width="227" height="32" className="partner-logo logo-light" src={product.logoLight} alt={product.partnerName} />
+      <img width="227" height="32" className="partner-logo logo-dark" src={product.logoDark || product.logoLight} alt={product.partnerName} />
     </> : <span className="partner-wordmark">{product.partnerName || product.name}</span>}
     {product.partnerName && <span className="brand-product">{product.name}</span>}
   </div>;
