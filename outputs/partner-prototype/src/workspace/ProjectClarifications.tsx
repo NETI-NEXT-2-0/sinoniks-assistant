@@ -20,6 +20,11 @@ interface Page {
   total: number;
   next_offset: number | null;
 }
+
+function onlyFreeText(question: Question): boolean {
+  return question.kind === "unsupported" ||
+    ((question.kind === "choice" || question.kind === "multiple") && !question.choices.length);
+}
 function parse(value: unknown, id: string): Page {
   if (
     !isRecord(value) ||
@@ -171,8 +176,9 @@ export function ProjectClarifications({
       cancelAnimationFrame(second);
     };
   }, [page]);
+  const showsFreeText = (question: Question) => onlyFreeText(question) || other[question.field];
   const answers = Object.values(visited).flatMap((question) => {
-    if (other[question.field]) return [];
+    if (showsFreeText(question)) return [];
     const answer = fieldAnswer(
       question, values[question.field] ?? "", values[question.field + ":upper"] ?? "",
       selected[question.field] ?? [], unknowns[question.field] ?? false,
@@ -248,12 +254,12 @@ export function ProjectClarifications({
           key={question.field}
           onSubmit={(event) => {
             event.preventDefault();
-            if (other[question.field]) void sendOther(question);
+            if (showsFreeText(question)) void sendOther(question);
           }}
         >
           <fieldset disabled={disabled || sending}>
             <legend>{question.text}</legend>
-            {other[question.field] ? (
+            {showsFreeText(question) ? (
               <label>
                 Свой ответ
                 <input
@@ -367,11 +373,6 @@ export function ProjectClarifications({
                   />
                 </label>
               </div>
-            ) : question.kind === "unsupported" ? (
-              <p>
-                Дополните это условие в редакторе проекта или напишите свой
-                ответ.
-              </p>
             ) : (
               <label>
                 Ответ
@@ -393,10 +394,10 @@ export function ProjectClarifications({
               </label>
             )}
             <div className="question-actions">
-              {other[question.field] && (
+              {showsFreeText(question) && (
                 <button type="submit">Отправить свой ответ</button>
               )}
-              {!other[question.field] && question.kind !== "unsupported" && question.reason !== "conflict" && (
+              {!showsFreeText(question) && question.reason !== "conflict" && (
                 <button
                   type="button"
                   onClick={() => {
@@ -406,14 +407,16 @@ export function ProjectClarifications({
                   {unknowns[question.field] ? "Отменить «Не знаю»" : "Не знаю"}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setOther((old) => ({ ...old, [question.field]: !old[question.field] }));
-                }}
-              >
-                {other[question.field] ? "К вариантам" : "Другое"}
-              </button>
+              {!onlyFreeText(question) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOther((old) => ({ ...old, [question.field]: !old[question.field] }));
+                  }}
+                >
+                  {other[question.field] ? "К вариантам" : "Другое"}
+                </button>
+              )}
             </div>
           </fieldset>
         </form>

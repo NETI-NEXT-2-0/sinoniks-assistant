@@ -317,7 +317,9 @@ def prepare_request(
     if design_context is not None and request_mode != "reference":
         label = ("New draft requirements (not yet saved)" if new_project
                  else "Saved project conditions")
-        project = "\n" + label + ":\n" + json.dumps(design_context, ensure_ascii=False)
+        project = "\n" + label + ":\n" + json.dumps(
+            design_context, ensure_ascii=False, separators=(",", ":"),
+        )
     calculation = ""
 
     def messages_for(
