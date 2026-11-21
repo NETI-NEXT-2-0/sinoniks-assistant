@@ -39,17 +39,20 @@ class FileLane:
             (self.source, self.pull), (self.destination, self.push),
         ) if setting is not None}
 
+    def checks_by_network(self) -> dict[str, list[dict[str, object]] | None]:
+        return {
+            side.network_id: None if checks is None else [json.loads(check) for check in checks]
+            for side in (self.source, self.destination)
+            for checks in [_checks(side)]
+        }
+
     def as_dict(self) -> dict[str, object]:
         sources = {(item.kind, item.reference, item.revision): item for flow in self.flows
                    for item in flow.sources}
         return {
             "from_network_id": self.source.network_id,
             "to_network_id": self.destination.network_id,
-            "checks_by_network": {
-                side.network_id: None if checks is None else [json.loads(check) for check in checks]
-                for side in (self.source, self.destination)
-                for checks in [_checks(side)]
-            },
+            "checks_by_network": self.checks_by_network(),
             "methods_by_network": {side.network_id: self.methods_on(side.network_id)
                                    for side in (self.source, self.destination)},
             "automations": {
@@ -129,6 +132,14 @@ class FileRule:
             "directions": [lane.as_dict() for lane in self.lanes],
         }
 
+    def check_directions(self) -> list[dict[str, object]]:
+        return [
+            {"from_network_id": lane.source.network_id,
+             "to_network_id": lane.destination.network_id,
+             "checks_by_network": lane.checks_by_network()}
+            for lane in self.lanes
+        ]
+
 
 @dataclass(frozen=True)
 class FileUserDetails:
@@ -184,7 +195,10 @@ def _method_present(side: FileSide19, automations: list[Automatic19]) -> bool:
     return bool(automations) or side.manual is True or side.usb is True
 
 
-def _lanes(flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str]) -> tuple[
+def _lanes(
+    flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str],
+    explicit_check_gaps: set[str],
+) -> tuple[
     list[FileLane], list[FileIssue],
 ]:
     if flow.sender_network_id is None or flow.receiver_network_id is None or flow.direction is None:
@@ -213,7 +227,9 @@ def _lanes(flow: FileFlow19, outside_network_id: str | None, usb_ids: set[str]) 
         issues.append(FileIssue(flow.id, "automation_conflicts_with_file_direction"))
     for side in sides.values():
         if side.checks is None:
-            issues.append(FileIssue(flow.id, "file_checks_unknown", side.network_id))
+            reason = ("file_check_scope_unconfirmed" if flow.has_declared_checks()
+                      and side.network_id not in explicit_check_gaps else "file_checks_unknown")
+            issues.append(FileIssue(flow.id, reason, side.network_id))
         elif any(check.kind == "unsupported" for check in side.checks):
             issues.append(FileIssue(flow.id, "unsupported_file_check", side.network_id))
         if side.usb is True and side.network_id != outside_network_id:
@@ -362,8 +378,14 @@ def calculate_file_rules(
     issues = []
     buckets: dict[Profile, list[FileLane]] = defaultdict(list)
     usb_ids = {system.id for system in request.systems if system.kind == "usb"}
+    documented_gaps = {note.path for note in request.unknowns}
+    check_gaps = {
+        flow.id: {side.network_id for side_index, side in enumerate(flow.sides)
+                  if f"/flows/{flow_index}/sides/{side_index}/checks" in documented_gaps}
+        for flow_index, flow in enumerate(request.flows) if isinstance(flow, FileFlow19)
+    }
     for flow in flows:
-        lanes, current_issues = _lanes(flow, outside_network_id, usb_ids)
+        lanes, current_issues = _lanes(flow, outside_network_id, usb_ids, check_gaps[flow.id])
         issues.extend(current_issues)
         for lane in lanes:
             buckets[_profile(lane)].append(lane)

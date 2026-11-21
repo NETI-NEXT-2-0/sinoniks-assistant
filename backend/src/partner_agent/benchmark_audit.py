@@ -8,6 +8,7 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+from xml.etree.ElementTree import Element
 
 MAX_BYTES = 2_000_000
 CASE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,49}")
@@ -15,6 +16,49 @@ CASE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,49}")
 
 class ReferenceReview(ValueError):
     """A reference leaves method direction unspecified; do not guess an oracle."""
+
+
+def compare_native_export(expert: dict[str, Any], native: Element) -> list[str]:
+    expected = expert.get("rules")
+    metadata = native.get("data-rule-rows")
+    if not isinstance(expected, list) or metadata is None:
+        return ["export_rules_unverified"] if expected else []
+    actual = json.loads(metadata)
+    fields = ("from_network_id", "to_network_id", "checks_by_network")
+    if native.get("data-placement-pending") == "true":
+        if (expert.get("synonyx") is not None or actual != []
+                or native.findall(".//mxCell[@edge='1']")):
+            return ["export_preview_mismatch"]
+        known_file_checks = {
+            rule["rule_id"]: [
+                {field: lane[field] for field in fields} for lane in rule["directions"]
+            ]
+            for rule in expected if rule["type"] == "file" and rule.get("checks")
+        }
+        preview_checks = json.loads(native.get("data-preview-file-checks", "{}"))
+        if not isinstance(preview_checks, dict) or any(
+            preview_checks.get(identifier) != directions
+            for identifier, directions in known_file_checks.items()
+        ):
+            return ["export_file_checks_mismatch"]
+        return []
+    if not isinstance(actual, list) or len(actual) != len(expected):
+        return ["export_rule_count_mismatch"]
+    issues = []
+    for rule, row in zip(expected, actual, strict=True):
+        if any((rule["id"] != row["number"], rule["rule_id"] != row["id"],
+                rule["from"] != row["from_network_id"], rule["to"] != row["to_network_id"],
+                (rule["mode"] == "two-way") != row["two_way"])):
+            issues.append("export_rule_mismatch")
+        if rule["type"] == "data" and (rule["protocol"], rule["port"]) != (
+            row["protocol"], row["destination_port"],
+        ):
+            issues.append("export_protocol_mismatch")
+        if rule["type"] == "file" and any(rule.get("checks", [])):
+            directions = [{field: lane[field] for field in fields} for lane in rule["directions"]]
+            if directions != row.get("file_check_directions"):
+                issues.append("export_file_checks_mismatch")
+    return list(dict.fromkeys(issues))
 
 
 def read_json(path: Path) -> tuple[Any, str]:

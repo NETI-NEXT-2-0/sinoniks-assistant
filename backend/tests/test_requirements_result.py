@@ -44,7 +44,8 @@ def test_unknown_placement_is_not_described_as_confirmed_architecture():
     )
     assert result["synonyx"] is None
     assert result["confirmed_rules_count"] is None
-    assert "diagram" not in artifacts and "drawio" not in artifacts
+    assert json.loads(artifacts["diagram"])["placement_pending"]
+    assert "Предварительная топология" in artifacts["drawio"]
     assert "Размещение пока не определено" in artifacts["txt"]
     assert "Полный минимум пока не подтверждён" in artifacts["txt"]
 

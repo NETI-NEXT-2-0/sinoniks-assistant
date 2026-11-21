@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 from decimal import Decimal
 from uuid import uuid4
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 import pytest
 
@@ -93,6 +94,67 @@ def test_full_inventory_is_only_ready_for_review_not_a_quality_grade(tmp_path):
     assert result["recorded_attempts"] == result["recorded_turns"] == 17
     assert Decimal(result["declared_cost_usd"]) == Decimal("0.00204")
     assert result["mean_full_elapsed_ms"] == 15000 and result["full_time_limit_met"]
+
+
+def test_step_records_screenshot_hash_and_time_from_its_session_ledger(tmp_path):
+    folder, records = captured(tmp_path)
+    first = records["captures"][0]
+    ledger = json.loads((folder / first["ledger"]).read_text())
+    first["steps"] = [{
+        "step_id": "first-result", "turn_id": ledger["turns"][0]["turn_id"],
+        "revision": 1, "prompt": "Build a preliminary topology",
+        "expected": "Known systems shown", "observed": "Known systems visible",
+        "review_status": "pass", "screenshots": ["result.png"],
+    }]
+    screenshot = folder / "result.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\nexample")
+    write(folder / "captures.json", records)
+    case = report(folder)["cases"][0]
+    step, = case["steps"]
+    assert step["full_elapsed_ms"] == 15000
+    assert step["screenshots"] == [
+        {"path": screenshot.name, "sha256": artifact(folder, screenshot.name)[2]},
+    ]
+    assert case["runtime_git_sha"] == SHA and case["expert_review_status"] == "pass"
+    screenshot.write_bytes(b"example")
+    first["steps"][0]["turn_id"] = str(uuid4())
+    write(folder / "captures.json", records)
+    assert set(report(folder)["cases"][0]["issues"]) == {
+        "step_without_recorded_turn", "invalid_step_screenshot",
+    }
+
+
+def test_collection_flags_protocol_mismatch_between_exports(tmp_path):
+    folder, records = captured(tmp_path)
+    first = records["captures"][0]
+    rule = {"id": 1, "rule_id": "rule", "from": "plant", "to": "office",
+            "mode": "one-way", "type": "data", "protocol": "UDP", "port": 514}
+    write(folder / first["expert"], {"session_id": first["session_id"], "rules": [rule]})
+    row = {"number": 1, "id": "rule", "from_network_id": "plant",
+           "to_network_id": "office", "two_way": False, "protocol": "UDP",
+           "destination_port": 515}
+    native = Element("mxfile", {"data-rule-rows": json.dumps([row])})
+    SubElement(native, "diagram")
+    (folder / first["drawio"]).write_bytes(tostring(native))
+    assert report(folder)["cases"][0]["issues"] == ["export_protocol_mismatch"]
+
+
+def test_collection_requires_known_file_checks_in_unplaced_preview(tmp_path):
+    folder, records = captured(tmp_path)
+    first = records["captures"][0]
+    directions = [{"from_network_id": "office", "to_network_id": "plant",
+                   "checks_by_network": {"office": [{"kind": "size", "details": None}],
+                                         "plant": None}}]
+    rule = {"type": "file", "rule_id": "file-rule", "directions": directions, "checks": ["size"]}
+    write(folder / first["expert"], {"session_id": first["session_id"], "rules": [rule]})
+    native = Element("mxfile", {"data-rule-rows": "[]", "data-placement-pending": "true"})
+    SubElement(native, "diagram")
+    path = folder / first["drawio"]
+    path.write_bytes(tostring(native))
+    assert report(folder)["cases"][0]["issues"] == ["export_file_checks_mismatch"]
+    native.set("data-preview-file-checks", json.dumps({"file-rule": directions}))
+    path.write_bytes(tostring(native))
+    assert not report(folder)["cases"][0]["issues"]
 
 
 @pytest.mark.parametrize("change", ["unknown_usage", "false_cost", "old_tariff", "orphan_call",

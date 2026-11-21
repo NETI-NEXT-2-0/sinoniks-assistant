@@ -10,9 +10,9 @@ from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from uuid import UUID
-from xml.etree.ElementTree import ParseError, fromstring
+from xml.etree.ElementTree import Element, ParseError, fromstring
 
-from partner_agent.benchmark_audit import MAX_BYTES, read_json
+from partner_agent.benchmark_audit import MAX_BYTES, compare_native_export, read_json
 from partner_agent.runtime.accounting_math import priced_usage
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -26,6 +26,10 @@ PROJECT_CASES = frozenset({"F01", "F02", "F04", "F07", "N01", "N05", "U01",
 ROUTE_KEYS = {"model_id", "provider_variant", "snapshot", "input_usd_per_million",
               "output_usd_per_million", "context_window_tokens", "max_output_tokens"}
 BASE_CASES = frozenset({"F01", "F02", "F04", "F07", "N01", "N05", "O01", "Q01", "Q10"})
+CAPTURE_KEYS = {"case_id", "session_id", "runtime_git_sha", "review_status",
+                "snapshot", "ledger", "expert", "drawio"}
+STEP_KEYS = {"step_id", "turn_id", "revision", "prompt", "expected", "observed",
+             "review_status", "screenshots"}
 
 
 def money(value: Any) -> Decimal:
@@ -120,7 +124,7 @@ def prepare(
     records = {"schema_version": 1, "captures": [
         {"case_id": name, "session_id": None, "runtime_git_sha": None,
          "review_status": "not_checked", "snapshot": None, "ledger": None,
-         "expert": None, "drawio": None} for name, _ in SESSION_PLAN
+         "expert": None, "drawio": None, "steps": []} for name, _ in SESSION_PLAN
     ]}
     contents = {"plan.json": plan, "captures.json": records}
     if benchmark is not None:
@@ -151,6 +155,51 @@ def artifact(root: Path, value: Any) -> tuple[Path, bytes, str]:
     return path, raw, hashlib.sha256(raw).hexdigest()
 
 
+def capture_steps(
+    root: Path, steps: Any, turns: list[Any], entries: list[Any], problems: list[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(steps, list) or len(steps) > 64:
+        raise ValueError("Invalid capture steps")
+    output = []
+    ids: set[str] = set()
+    by_turn = {turn["turn_id"]: turn for turn in turns if isinstance(turn, dict)
+               and isinstance(turn.get("turn_id"), str)}
+    for step in steps:
+        if not isinstance(step, dict) or set(step) != STEP_KEYS:
+            raise ValueError("Invalid capture step")
+        identifier, turn_id, revision = step["step_id"], step["turn_id"], step["revision"]
+        text_limits = (("prompt", 16000), ("expected", 4000), ("observed", 4000))
+        if (not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,48}", identifier)
+                or identifier in ids or not isinstance(turn_id, str)
+                or (revision is not None and (type(revision) is not int or revision < 1))
+                or step["review_status"] not in ("pass", "fail", "not_checked")
+                or any(not isinstance(step[key], str) or not 1 <= len(step[key].strip()) <= limit
+                       for key, limit in text_limits)):
+            raise ValueError("Invalid capture step values")
+        ids.add(identifier)
+        turn = by_turn.get(turn_id)
+        if turn is None:
+            problems.append("step_without_recorded_turn")
+        paths = step["screenshots"]
+        if not isinstance(paths, list) or not 1 <= len(paths) <= 12:
+            raise ValueError("A capture step requires one to twelve screenshots")
+        screenshots = []
+        for value in paths:
+            try:
+                path, raw, digest = artifact(root, value)
+                if path.suffix.lower() != ".png" or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("Expected a PNG screenshot")
+                screenshots.append({"path": value, "sha256": digest})
+            except (OSError, ValueError):
+                problems.append("invalid_step_screenshot")
+        call_ids = [call["call_id"] for call in entries if isinstance(call, dict)
+                    and call.get("turn_id") == turn_id and isinstance(call.get("call_id"), str)]
+        output.append({**step, "screenshots": screenshots, "call_ids": call_ids,
+                       "full_elapsed_ms": turn.get("full_elapsed_ms")
+                       if turn and turn.get("timing_scope") == "full_result" else None})
+    return output
+
+
 def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
     plan, plan_hash = read_json(plan_path)
     records, records_hash = read_json(captures_path)
@@ -167,8 +216,7 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
     known_cases = {name for name, _ in SESSION_PLAN}
     by_case = {}
     for row in captures:
-        if (not isinstance(row, dict) or set(row) != {"case_id", "session_id", "runtime_git_sha",
-                "review_status", "snapshot", "ledger", "expert", "drawio"}
+        if (not isinstance(row, dict) or set(row) - {"steps"} != CAPTURE_KEYS
                 or not isinstance(row["case_id"], str)
                 or (row["case_id"] not in known_cases
                     and not re.fullmatch(r"EXTRA-[A-Za-z0-9_-]{1,30}", row["case_id"]))):
@@ -212,6 +260,7 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
         if case in PROJECT_CASES - {"N01", "U04-open"}:
             required.add("drawio")
         data = {}
+        native_export: Element | None = None
         for kind in ("snapshot", "ledger", "expert", "drawio"):
             if row[kind] is None:
                 if kind in required:
@@ -225,6 +274,7 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
                     if (native is None or native.tag != "mxfile"
                             or not 1 <= len(native.findall("diagram")) <= 86):
                         raise ValueError("Invalid native XML")
+                    native_export = native
                 else:
                     content, parsed_hash = read_json(path)
                     if parsed_hash != digest:
@@ -239,6 +289,11 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
                 hashes[kind] = digest
             except (OSError, ValueError, ParseError, TypeError, AttributeError):
                 problems.append("invalid_" + kind)
+        if "expert" in data and native_export is not None:
+            try:
+                problems.extend(compare_native_export(data["expert"], native_export))
+            except (KeyError, ValueError, TypeError, AttributeError):
+                problems.append("invalid_export_rule_metadata")
         ledger = data.get("ledger", {})
         entries, turns = ledger.get("calls"), ledger.get("turns")
         if (not isinstance(entries, list) or len(entries) > 10000
@@ -246,6 +301,11 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
             problems.append("incomplete_ledger")
             unknown_cost = unknown_timing = True
             entries, turns = [], []
+        steps = capture_steps(captures_path.parent, row.get("steps", []), turns, entries, problems)
+        if row["review_status"] == "pass" and any(
+            step["review_status"] == "fail" for step in steps
+        ):
+            problems.append("review_status_conflicts_with_step")
         if ledger.get("legacy_untracked_turns") != 0:
             problems.append("untracked_turns")
             unknown_cost = True
@@ -324,7 +384,9 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
             else:
                 timings.append(elapsed)
         issues.extend(case + ":" + problem for problem in dict.fromkeys(problems))
-        outputs.append({"case_id": case, "artifact_sha256": hashes,
+        outputs.append({"case_id": case, "runtime_git_sha": row["runtime_git_sha"],
+                        "artifact_sha256": hashes, "steps": steps,
+                        "expert_review_status": row["review_status"],
                         "issues": list(dict.fromkeys(problems))})
     for shared in sessions.values():
         if len(shared) > 1:
@@ -333,6 +395,11 @@ def collect(plan_path: Path, captures_path: Path) -> dict[str, Any]:
                 next(row for row in outputs if row["case_id"] == case)["issues"].append(
                     "session_reused",
                 )
+    for row in outputs:
+        row["automatic_evidence_status"] = (
+            "incomplete" if any(not issue.startswith("manual_review_") for issue in row["issues"])
+            else "ready_for_review"
+        )
     if not calls:
         issues.append("no_provider_attempts_recorded")
     if len(calls) > 60:

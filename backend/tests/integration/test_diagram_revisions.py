@@ -121,6 +121,9 @@ async def test_mixed_project_keeps_all_flow_links_through_extraction_and_exports
             "purpose": f"Журнал {index}", "destination_port": 1514 + index,
         })
     file_flow["sides"][1]["checks"] = None
+    conditions.setdefault("unknowns", []).append({
+        "path": "/flows/2/sides/1/checks", "reason": "missing", "target_id": file_flow["id"],
+    })
     for index in range(5):
         item = deepcopy(file_flow)
         item.update(id=f"file-{index}", purpose=f"Документы {index}", sender_ids=[])
