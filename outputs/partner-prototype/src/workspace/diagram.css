@@ -23,3 +23,4 @@
 .diagram-hint, .diagram-status { font-size: 13px; padding: 12px 16px; color: var(--secondary); line-height: 1.65; }
 .diagram-rule-table table { font-size: 14px; }
 .diagram-rule-table th, .diagram-rule-table td { padding: 12px 16px; }
+.diagram-rule-table td:first-child { color: var(--secondary); }

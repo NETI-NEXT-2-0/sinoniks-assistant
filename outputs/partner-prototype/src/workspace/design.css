@@ -100,3 +100,12 @@
  .project-sections button { flex: 1; }
  .project-workbench .design-fields { row-gap: 20px; }
 }
+
+.project-workbench fieldset>.design-fields+.design-fields { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--stroke); }
+.project-result-actions { margin-bottom: 24px; }
+.project-next-steps { padding: 20px; margin-bottom: 24px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; }
+.project-next-steps h3 { font-size: 20px; margin: 0 0 12px; }
+.project-next-steps p { color: var(--secondary); font-size: 14px; line-height: 1.65; }
+.project-next-steps button { margin-top: 16px; }
+.project-workbench .diagram-viewer svg { height: min(62vh, 620px); min-height: 380px; }
+@media(max-width:760px) { .project-workbench .diagram-viewer svg { height: 380px; min-height: 0; } }

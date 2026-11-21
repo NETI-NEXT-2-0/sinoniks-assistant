@@ -71,3 +71,18 @@ def test_saved_diagram_side_mapping_uses_placement_not_network_list_order():
         request_mode="reference",
     )
     assert '"right":' not in reference.messages[-1]["content"]
+
+
+def test_latest_clarification_survives_a_full_evidence_window():
+    history = [
+        {"role": "user", "content": "Добавь компьютер 3 справа"},
+        {"role": "assistant", "content": "В какую сеть добавить компьютер 3?"},
+    ]
+    request = prepare_request(
+        "Сеть цеха",
+        [{"evidence_id": str(i), "excerpt": "Справочный материал. " * 70} for i in range(20)],
+        history,
+    )
+    assert request.messages[1:3] == history
+    assert len(__import__("json").dumps(request.messages, ensure_ascii=False)) <= 32000
+    assert {e["evidence_id"] for e in request.evidence} <= {str(i) for i in range(20)}
