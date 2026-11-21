@@ -225,7 +225,7 @@ def prepare_request(
             "expert JSON are supported APPLICATION actions, not unsupported device features. "
             "Do not add them to requests_for_vendor or vendor_wishes. "
             "Every id, reference and access_group is a technical identifier: 1-80 ASCII "
-            "letters, digits, underscores or hyphens only (^[A-Za-z0-9_-]{1,80}$). "
+            "letters, digits, underscores or hyphens only (^[a-zA-Z0-9_-]{1,80}$). "
             "Human-readable names and explanations may be in the user's language. For example, "
             "use access_group=shared_documents, laboratory_group or service_group, never a "
             "display label with spaces. Reuse the same group identifier for the same access "
