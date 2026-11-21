@@ -13,7 +13,7 @@ from partner_agent.design_service import latest_revision, validate_project_sourc
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_stage2 import Message, ResumeCommand, Run
-from partner_agent.project_answers import ProjectAnswer19, apply_answer
+from partner_agent.project_answers import ProjectAnswerCommand19, apply_answer
 from partner_agent.runs.service import (
     admission_response,
     admit_run,
@@ -53,7 +53,7 @@ class RunBody(BaseModel):
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
     web_mode: Literal["off", "public", "official"] = "off"
     request_mode: RequestMode = "auto"
-    project_answer: ProjectAnswer19 | None = None
+    project_answer: ProjectAnswerCommand19 | None = None
     vendor_wish: SubmittedWish | None = None
 
     @model_validator(mode="after")

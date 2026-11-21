@@ -10,7 +10,7 @@ from partner_agent.infra.models import User
 from partner_agent.infra.models_designs import RunDesignContext
 from partner_agent.infra.models_stage2 import Run
 from partner_agent.infra.settings import get_settings
-from partner_agent.project_answers import ProjectAnswer19, apply_answer
+from partner_agent.project_answers import apply_answer, parse_project_answer
 from partner_agent.runs.service import StaleOwnership
 from partner_agent.runtime.context import project_evidence
 from partner_agent.runtime.lifecycle import Claim, complete, heartbeat
@@ -43,7 +43,7 @@ async def execute_project_answer(claim: Claim) -> dict[str, str]:
     renewal = asyncio.create_task(renew())
     try:
         async with asyncio.timeout(claim.remaining_seconds):
-            answer = ProjectAnswer19.model_validate(claim.project_answer)
+            answer = parse_project_answer(claim.project_answer)
             async with session_factory()() as db:
                 run = await db.get(Run, run_id)
                 actor = await db.get(User, claim.user_id)

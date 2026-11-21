@@ -54,6 +54,7 @@ with sync_playwright() as session:
         assert first["result"]["synonyx"] is None
         card = page.get_by_role("region", name="Проект Синоникса · версия 1", exact=True)
         card.get_by_role("button", name="Не знаю", exact=True).click()
+        card.get_by_role("button", name="Применить ответы (1)", exact=True).click()
         expect(page.get_by_text("Готово", exact=True)).to_have_count(2, timeout=30000)
         unknown = latest(chat)
         assert unknown["input"]["unknowns"][0]["path"] == "/protected_network_id"
