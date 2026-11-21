@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     absolute_ttl_seconds: int = 604800
     login_failures_per_minute: int = 5
     self_registration_enabled: bool = False
+    developer_diagnostics_enabled: bool = False
     registration_attempts_per_minute: int = Field(default=5, gt=0)
     api_requests_per_minute: int = 120
     runtime_profile: Literal["offline_fixture", "openai_compatible"] = "offline_fixture"
@@ -86,6 +87,8 @@ class Settings(BaseSettings):
         ):
             raise ValueError("public_origin must be an origin, without path or credentials")
         self.public_origin = self.public_origin.rstrip("/")
+        if self.environment == "production" and self.developer_diagnostics_enabled:
+            raise ValueError("developer diagnostics cannot be enabled in production")
         if self.environment == "production" and origin.scheme != "https":
             raise ValueError("production requires HTTPS")
         if self.environment != "production" and origin.hostname not in (

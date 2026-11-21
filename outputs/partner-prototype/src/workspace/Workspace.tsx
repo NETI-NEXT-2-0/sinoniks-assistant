@@ -66,6 +66,17 @@ function runFailure(run: Run): string {
   return 'Выполнение завершилось технической ошибкой. Ответ не подтверждён.';
 }
 
+function DeveloperDiagnostics({ run }: { run: Run }) {
+  const outcome = isRecord(run.outcome) ? run.outcome : null;
+  const diagnostic = isRecord(outcome?.developer_diagnostics) ? outcome.developer_diagnostics : null;
+  if (!diagnostic) return null;
+  // Server supplies only allowlisted schema locations/types, never provider payloads.
+  const report = JSON.stringify({ error_code: outcome?.code, ...diagnostic }, null, 2);
+  return <details className="run-developer-diagnostics"><summary>Диагностика разработчика</summary>
+    <pre>{report}</pre><button type="button" onClick={() => { void navigator.clipboard.writeText(report); }}>Скопировать диагностику</button>
+  </details>;
+}
+
 function RunState({ run }: { run: Run }) {
   return <span className={`run-status run-${run.status}`}><i aria-hidden="true" />{labels[run.status]}{run.status === 'queued' && run.queue_position > 0 ? ` · ${run.queue_position}` : ''}</span>;
 }
@@ -228,7 +239,7 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
     return <div className="run-detail" key={run.id}>
       <RunState run={run} />
       {!terminal(run.status) && <button className="run-stop" aria-label={`Остановить выполнение ${run.queue_seq}`} onClick={() => { void space.cancel(run.id); }}><Icon name="stop" />Стоп</button>}
-      {run.status === 'failed' && <p className="run-explanation">{runFailure(run)}</p>}
+      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p><DeveloperDiagnostics run={run} /></>}
       {run.status === 'cancelled' && <p className="run-explanation">Выполнение остановлено. Полученный фрагмент сохранён.</p>}
       {run.status === 'waiting_input' && <div className="clarification">
         <p>{run.clarification_question ?? 'Уточните запрос, чтобы продолжить.'}</p>

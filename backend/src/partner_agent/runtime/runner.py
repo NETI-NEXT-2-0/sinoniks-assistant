@@ -178,6 +178,14 @@ async def execute_run(
             failure: dict[str, Any] = {"code": code, "profile": settings.runtime_profile}
             if not provider_started:
                 failure["provider_calls"] = 0
+            if (settings.developer_diagnostics_enabled and settings.environment != "production"):
+                diagnostics = getattr(error, "diagnostics", None)
+                failure["developer_diagnostics"] = {
+                    "run_id": str(run_id),
+                    "exception_type": type(error).__name__,
+                    **(diagnostics if isinstance(diagnostics, dict) else
+                       {"stage": "runtime", "reason": str(code)}),
+                }
             if usage:
                 failure.update(usage=usage, estimated_cost_usd=actual_cost,
                                usage_complete=actual_cost is not None)

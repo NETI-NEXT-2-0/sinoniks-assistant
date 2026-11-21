@@ -332,3 +332,42 @@ async def test_grounded_answer_requires_at_least_one_citation(monkeypatch, mode)
     evidence = [{"evidence_id": "u1", "excerpt": "The course costs 100."}]
     with pytest.raises(ProviderError, match="provider_missing_grounded_citation"):
         await answer_with_provider(settings, "How much is the course?", evidence)
+
+
+@pytest.mark.asyncio
+async def test_design_validation_exposes_safe_paths_without_model_values(monkeypatch):
+    """Failed model design exposes only structured diagnostic metadata."""
+    secret = "PRIVATE_TEST_DESIGN_VALUE"
+    async def model(settings, messages):
+        return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "answer": "Draft", "citations": [], "mode": "design",
+            "design": {"networks": [{"name": secret}], "unexpected_secret": secret},
+        })}}], "usage": {"prompt_tokens": 100, "completion_tokens": 200,
+                      "total_tokens": 300}}
+
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    with pytest.raises(ProviderError) as captured:
+        await answer_with_provider(settings, "Design", [], request_mode="design")
+    error = captured.value
+    assert error.code == "provider_invalid_design"
+    assert error.usage == {"prompt_tokens": 100, "completion_tokens": 200,
+                           "total_tokens": 300}
+    assert error.diagnostics["stage"] == "design_validation"
+    assert error.diagnostics["issue_count"] >= 1
+    assert error.diagnostics["issues"]
+    assert secret not in json.dumps(error.diagnostics)
+
+
+def test_developer_diagnostics_defaults_off_and_rejects_production():
+    from pydantic import ValidationError
+
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    assert not settings.developer_diagnostics_enabled
+    enabled = Settings(database_url="postgresql+psycopg://u:p@localhost/db",
+                       developer_diagnostics_enabled=True)
+    assert enabled.developer_diagnostics_enabled
+    with pytest.raises(ValidationError, match="developer diagnostics cannot be enabled"):
+        Settings(database_url="postgresql+psycopg://u:p@localhost/db",
+                 environment="production", public_origin="https://example.com",
+                 developer_diagnostics_enabled=True)
