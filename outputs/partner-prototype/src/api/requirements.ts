@@ -1,5 +1,6 @@
 import { ApiError, isRecord, type AuthClient } from "./client";
 import type { DesignRevision } from "./designs";
+import { readReadiness, type ReadinessReport } from "./readiness";
 
 export interface Network19 {
   id: string;
@@ -79,6 +80,7 @@ export interface RequirementsInput {
   legacy?: unknown;
 }
 export interface CalculatedResult19 {
+  readiness?: ReadinessReport;
   schema_version: '1.1'; status: 'needs_clarification' | 'preliminary' | 'completed' | 'unsupported';
   explanation: string; rules_count: number; rules_lower_bound: number; confirmed_rules_count: number | null;
   rules_lower_bound_breakdown?: { data: number; file: number };
@@ -136,6 +138,7 @@ function parse(value: unknown): AnyRevision {
         String(value.status),
       ) ||
       (value.result !== null && (!isRecord(value.result) || value.result.schema_version !== "1.1" || !Array.isArray(value.result.rules) || typeof value.result.explanation !== "string"))
+      || (isRecord(value.result) && value.result.readiness !== undefined && !readReadiness(value.result.readiness))
     )
       throw new ApiError(502, "invalid_response");
   } else if (!Array.isArray(value.input.exchanges))

@@ -205,7 +205,11 @@ export function ProjectClarifications({
     setSending(true);
     setError("");
     try {
-      if (!(await onAnswer("Применить уточнения проекта", {
+      const message = ["Ответы на уточнения проекта:",
+        ...answers.map(answer => `${visited[answer.path]?.text ?? 'Условие'}: ${answer.unknown ? 'Не знаю' : JSON.stringify(answer.value)}`),
+        ...remarks.map(remark => `${visited[remark.path]?.text ?? 'Условие'}\nОтвет: ${remark.text}`),
+      ].join("\n\n");
+      if (!(await onAnswer(message, {
         base_revision_id: revisionId, answers, ...(remarks.length ? { remarks } : {}),
       }))) {
         setError("Ответы не подтверждены. Проверьте состояние отправки или откройте актуальный проект.");
@@ -239,8 +243,8 @@ export function ProjectClarifications({
         </span>
       </h4>
       <p>
-        Примените готовые варианты и свои ответы вместе. Свой текст
-        сохранится в пожеланиях чата как пояснение к вопросу.
+        Примените готовые варианты и свои ответы вместе. Свободный текст
+        будет разобран как условия проекта; вопросы и ответы сохранятся в чате.
       </p>
       {error && <p role="alert">{error}</p>}
       {page.questions.map((question) => (

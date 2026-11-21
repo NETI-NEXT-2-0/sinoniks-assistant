@@ -13,7 +13,13 @@ from partner_agent.design_service import latest_revision, validate_project_sourc
 from partner_agent.infra.errors import APIError
 from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_stage2 import Message, ResumeCommand, Run
-from partner_agent.project_answers import ProjectAnswerBatch19, ProjectAnswerCommand19, apply_answer
+from partner_agent.project_answers import (
+    ProjectAnswerBatch19,
+    ProjectAnswerCommand19,
+    apply_answer,
+    clarification_message,
+    needs_text_interpretation,
+)
 from partner_agent.runs.service import (
     admission_response,
     admit_run,
@@ -109,6 +115,7 @@ async def submit(
     if body.web_mode != "off":
         raise APIError(503, "stage_unavailable", "Web tools are not enabled yet")
     branch = await selected_branch(db, chat, body.branch_id)
+    message = body.message
     if body.project_answer is not None:
         if body.request_mode == "reference" or body.attachment_ids:
             raise APIError(422, "project_answer_mode_invalid", "Use a project field answer")
@@ -118,13 +125,17 @@ async def submit(
         await validate_project_sources(db, user, chat.id, project)
         if project.input.get("schema_version") != 3:
             raise APIError(409, "project_answer_version_invalid", "Use requirements 1.9")
-        apply_answer(Requirements19.model_validate(project.input), body.project_answer)
+        conditions = Requirements19.model_validate(project.input)
+        apply_answer(conditions, body.project_answer)
+        message = clarification_message(conditions, body.project_answer)
     run = await admit_run(
-        db, chat, branch, user, body.message, attachment_ids=body.attachment_ids,
+        db, chat, branch, user, message, attachment_ids=body.attachment_ids,
         request_mode=body.request_mode,
     )
     if body.project_answer is not None:
-        run.outcome = {"project_answer": body.project_answer.model_dump(mode="json")}
+        command = body.project_answer.model_dump(mode="json")
+        run.outcome = {"project_answer": command,
+                       "interpret_project_answer": needs_text_interpretation(command)}
     result = await admission_response(db, chat, run)
     if body.vendor_wish is not None:
         # The immutable admission receipt survives cancellation, crashes and outcome replacement.
@@ -132,6 +143,7 @@ async def submit(
     if isinstance(body.project_answer, ProjectAnswerBatch19) and body.project_answer.remarks:
         result = {**result, "project_answer_remarks": [
             {**remark.model_dump(mode="json"), "kind": "free_text",
+             "purpose": "project_clarification",
              "base_revision_id": str(body.project_answer.base_revision_id)}
             for remark in body.project_answer.remarks
         ]}
@@ -166,9 +178,12 @@ async def cancel(run_id: uuid.UUID, request: Request, db: DB) -> dict[str, Any]:
     chat, run = await lock_run(db, run_id)
     outcome: dict[str, Any] = {"reason": "user_cancelled"}
     if "project_answer" in (run.outcome or {}):
-        # This admitted operation cannot call a model, including after claim.
-        outcome.update({"execution": "local_project_answer", "provider_calls": 0,
-                        "project_answer": (run.outcome or {})["project_answer"]})
+        answer = (run.outcome or {})["project_answer"]
+        interpret = bool((run.outcome or {}).get("interpret_project_answer"))
+        outcome.update({"execution": "model_project_answer" if interpret
+                        else "local_project_answer", "project_answer": answer})
+        if not interpret:
+            outcome["provider_calls"] = 0
         if "design_input_version" in (run.outcome or {}):
             outcome["design_input_version"] = (run.outcome or {})["design_input_version"]
     await finish_run(db, chat, run, "cancelled", outcome)

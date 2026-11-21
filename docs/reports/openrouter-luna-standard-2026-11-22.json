@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-21T18:23:33.823354+00:00",
+  "source": "https://openrouter.ai/api/v1/models/openai/gpt-6-luna/endpoints",
+  "source_sha256": "3e1e60818bf808fb88b560641dfbbc2ecf5c36b668dd6cf7dfc4e58dfd63c857",
+  "snapshot_id": "openrouter:2026-11-21T18:23:33.823354+00:00:3e1e60818bf8",
+  "model_id": "openai/gpt-6-luna",
+  "provider_variant": "openai",
+  "currency": "USD",
+  "input_per_million": "0.1000000",
+  "output_per_million": "0.5000000",
+  "applicable_prompt_tokens_below": 272000,
+  "context_window_tokens": 1050000,
+  "overrides": [
+    {
+      "min_prompt_tokens": 272000,
+      "prompt": "0.0000002",
+      "completion": "0.00000075",
+      "input_cache_read": "0.00000002",
+      "input_cache_write": "0.00000025"
+    }
+  ]
+}

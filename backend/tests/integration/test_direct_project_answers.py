@@ -76,7 +76,17 @@ async def test_direct_answer_is_idempotent_auditable_and_zero_provider_calls(pla
 async def test_batch_applies_typed_answers_and_preserves_other_text(plane, monkeypatch):
     client, headers, _ = await plane()
     configure_execution(monkeypatch)
-    no_model(monkeypatch)
+    from partner_agent.sinoniks_contract19 import Requirements19
+    calls = []
+    async def interpret(settings, question, evidence, **kwargs):
+        calls.append(question)
+        assert remark["text"] in question and "Нужны ли ответные пакеты?" in question
+        assert kwargs["design_context"]["flows"][0]["protocol"] == "UDP"
+        assert "UNSAVED draft" in kwargs["prepared"].messages[0]["content"]
+        return {"answer": "Условия обновлены", "answer_mode": "design", "citations": [],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                "design": Requirements19.model_validate(kwargs["design_context"])}
+    monkeypatch.setattr("partner_agent.runtime.runner.answer_with_provider", interpret)
     chat = await new_chat(client, headers)
     chat_url = f"/api/v1/chats/{chat['id']}"
     branch = chat["default_branch_id"]
@@ -130,11 +140,10 @@ async def test_batch_applies_typed_answers_and_preserves_other_text(plane, monke
     assert current["input"]["flows"][0]["mode"] is None
     assert [note["path"] for note in current["input"]["unknowns"]] == ["/flows/0/destination_port"]
     run = (await client.get(f"/api/v1/runs/{run_id}")).json()
-    assert run["outcome"]["provider_calls"] == 0
+    assert run["outcome"]["execution"] == "model_project_answer"
+    assert len(calls) == 1
     assert len(run["outcome"]["project_answer"]["answers"]) == 2
-    exported, = (await client.get(chat_url + "/vendor-wishes/export")).json()["wishes"]
-    assert exported["origin"] == "user_submission"
-    assert exported["path"] == remark["path"] and exported["text"] == remark["text"]
+    assert (await client.get(chat_url + "/vendor-wishes/export")).json()["wishes"] == []
 
 
 async def test_questions_are_exact_owner_branch_scoped_and_stale_selection_rejected(plane):

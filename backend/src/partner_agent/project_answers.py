@@ -87,6 +87,69 @@ class ProjectAnswerBatch19(StrictModel):
 ProjectAnswerCommand19 = ProjectAnswer19 | ProjectAnswerBatch19
 
 
+def needs_text_interpretation(value: dict[str, Any] | None) -> bool:
+    return bool(value and value.get("remarks"))
+
+
+def clarification_message(request: Requirements19, command: ProjectAnswerCommand19) -> str:
+    """Readable durable input, including the actual answers rather than a service phrase."""
+    questions = {item["field"]: item for item in question_choices(request)}
+    lines = ["Ответы на уточнения проекта:"]
+    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    for answer in answers:
+        question = questions.get(answer.path, {})
+        values = answer.value if isinstance(answer.value, list) else [answer.value]
+        labels = [next((choice["label"] for choice in question.get("choices", [])
+                        if choice["value"] == value), json.dumps(value, ensure_ascii=False))
+                  for value in values]
+        label = "Не знаю" if answer.unknown else ", ".join(labels)
+        lines.append(f"• {question.get('text', 'Условие проекта')}: {label}")
+    if isinstance(command, ProjectAnswerBatch19):
+        for remark in command.remarks:
+            remark_question = questions.get(remark.path)
+            if remark_question is None:
+                raise APIError(409, "question_context_changed", "Reload the project question")
+            lines.append(f"• {remark_question['text']}\nОтвет: {remark.text}")
+    text = "\n\n".join(lines)
+    if len(text.encode("utf-8")) > 32768:
+        raise APIError(422, "project_answer_text_limit", "Apply these answers in smaller batches")
+    return text
+
+
+def reapply_structured_answers(
+    request: Requirements19, command: ProjectAnswerCommand19,
+) -> Requirements19:
+    """Explicit selections win over model interpretation, bound by stable IDs.
+
+    No intermediate revision is saved. Reordering entities does not redirect an
+    answer to another object, and a deleted target rejects the whole proposal.
+    """
+    document = request.model_dump(mode="json")
+    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    for answer in answers:
+        parts = answer.path.split("/")
+        if answer.target_id is not None:
+            rows = document[parts[1]]
+            index = next((i for i, row in enumerate(rows) if row["id"] == answer.target_id), None)
+            if index is None:
+                raise APIError(409, "question_context_changed", "The answer target was removed")
+            parts[2] = str(index)
+            if answer.side_network_id is not None:
+                side = next((i for i, row in enumerate(rows[index]["sides"])
+                             if row["network_id"] == answer.side_network_id), None)
+                if side is None:
+                    raise APIError(409, "question_context_changed", "The answer side was removed")
+                parts[4] = str(side)
+        bound = answer.model_copy(update={"path": "/".join(parts)})
+        if answer.unknown:
+            empty: JsonValue = [] if parts[-1] in ("sender_ids", "receiver_ids") else None
+            _apply_field_answer(document, bound.model_copy(
+                update={"unknown": False, "value": empty},
+            ))
+        _apply_field_answer(document, bound)
+    return Requirements19.model_validate(document)
+
+
 def parse_project_answer(value: dict[str, Any] | None) -> ProjectAnswerCommand19:
     if value is not None and "answers" in value:
         return ProjectAnswerBatch19.model_validate(value)
