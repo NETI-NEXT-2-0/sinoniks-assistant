@@ -75,7 +75,14 @@ def test_known_file_checks_are_exported_before_placement():
     rule = json.loads(artifacts["json"])["rules"][0]
     assert set(rule["checks"]) == {"ICAP: внешний антивирус", "маска имени", "размер"}
     assert not rule["checks_by_node"]
-    assert all(check in artifacts["txt"] for check in rule["checks"])
+    assert all(check in artifacts["txt"] and check in artifacts["drawio"]
+               for check in rule["checks"])
+    preview = fromstring(artifacts["drawio"])
+    assert preview.get("data-placement-pending") == "true"
+    checks = json.loads(preview.attrib["data-preview-file-checks"])
+    assert checks[rule["rule_id"]][0]["checks_by_network"] == (
+        rule["directions"][0]["checks_by_network"]
+    )
 
 
 def test_known_check_parameters_are_requested_without_inventing_a_second_scope():

@@ -52,6 +52,8 @@ def scene_drawio(scene: dict[str, Any]) -> str:
         file.set("data-firewall", json.dumps(scene["firewall"], ensure_ascii=False))
     if scene.get("placement_pending") is True:
         file.set("data-placement-pending", "true")
+        file.set("data-preview-file-checks", json.dumps(scene["preview_file_checks"],
+                                                        ensure_ascii=False))
     for page in scene["pages"]:
         diagram = SubElement(file, "diagram", id=page["id"], name=page["title"])
         model = SubElement(diagram, "mxGraphModel", {

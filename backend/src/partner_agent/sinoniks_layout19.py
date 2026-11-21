@@ -2,7 +2,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 
 from partner_agent.sinoniks_calculation import RuleCalculation
-from partner_agent.sinoniks_contract19 import DataFlow19, Requirements19, System19
+from partner_agent.sinoniks_contract19 import DataFlow19, FileCheck19, Requirements19, System19
 from partner_agent.sinoniks_data_rules import (
     FIREWALL_ID,
     RULE_LIMIT,
@@ -25,6 +25,20 @@ from partner_agent.sinoniks_result_export import check_label
 
 RULES_PER_PAGE = 3
 ENDPOINTS_PER_SIDE = 16
+
+
+def _check_summary(checks: list[FileCheck19] | None) -> str:
+    labels = []
+    for check in checks or []:
+        if check.kind == "unsupported":
+            continue
+        label = check_label(check)
+        if check.details is not None:
+            label += f" ({check.details})"
+        elif check.kind in ("name_mask", "size", "type_extension"):
+            label += " (параметр не задан)"
+        labels.append(label)
+    return ", ".join(labels)
 
 
 @dataclass(frozen=True)
@@ -147,27 +161,12 @@ class LayoutContext:
                 if manual is not None:
                     methods.add("SFTP вручную" if manual == "SFTP" else "Вручную")
         description = ", ".join(sorted(methods)) or "Файлы"
-        checks_by_direction: list[dict[str, object]] = [
-            {"from_network_id": direction.source.network_id,
-             "to_network_id": direction.destination.network_id,
-             "checks_by_network": direction.checks_by_network()}
-            for direction in rule.lanes
-        ]
         check_lines = []
         for direction in rule.lanes:
             for side in (direction.source, direction.destination):
-                labels = []
-                for check in side.checks or []:
-                    if check.kind == "unsupported":
-                        continue
-                    label = check_label(check)
-                    if check.details is not None:
-                        label += f" ({check.details})"
-                    elif check.kind in ("name_mask", "size", "type_extension"):
-                        label += " (параметр не задан)"
-                    labels.append(label)
-                if labels:
-                    check_lines.append(f"{network_names[side.network_id]}: {', '.join(labels)}")
+                summary = _check_summary(side.checks)
+                if summary:
+                    check_lines.append(f"{network_names[side.network_id]}: {summary}")
         return DisplayRule(
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),
             list(dict.fromkeys(receivers)), rule.direction == "both", description,
@@ -176,7 +175,7 @@ class LayoutContext:
             lane.source.network_id, lane.destination.network_id, file=True,
             provisional=any(direction.provisional for direction in rule.lanes),
             primary_senders=primary_senders, primary_receivers=primary_receivers,
-            file_check_directions=checks_by_direction,
+            file_check_directions=rule.check_directions(),
             file_check_summary="; ".join(dict.fromkeys(check_lines)),
         )
 
@@ -503,6 +502,13 @@ def _unplaced_topology(request: Requirements19) -> list[Page]:
                 direction = {"forward": "→", "both": "↔"}.get(flow.direction or "", "·")
             top += _text(page, f"flow-{flow.id}", f"{source} {direction} {target} · {service}",
                          26, top, 1380)
+            if not isinstance(flow, DataFlow19):
+                for side in flow.sides:
+                    summary = _check_summary(side.checks)
+                    if summary:
+                        network_name = names[side.network_id]
+                        top += _text(page, f"checks-{flow.id}-{side.network_id}",
+                                     f"{network_name}: {summary}", 40, top, 1360)
         page.height = top + 26
         if offset:
             pages.append(page)
@@ -520,6 +526,9 @@ def layout19(request: Requirements19, result: RuleCalculation) -> dict[str, obje
     }
     if placement is None:
         return {**scene, "placement_pending": True, "rule_rows": [],
+                "preview_file_checks": {
+                    rule.id: rule.check_directions() for rule in result.files.rules
+                },
                 "pages": [asdict(page) for page in _unplaced_topology(request)]}
     context = LayoutContext({system.id: system for system in request.systems}, placement)
     networks = {network.id: network.name or network.id for network in request.networks}

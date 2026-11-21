@@ -30,6 +30,11 @@ SOLVER_CONFLICTS = {
 }
 
 
+def _file_check_directions(rule: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = ("from_network_id", "to_network_id", "checks_by_network")
+    return [{key: direction[key] for key in fields} for direction in rule["directions"]]
+
+
 def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> list[dict[str, Any]]:
     """Check semantic identities, not presentation coordinates or key ordering."""
     try:
@@ -53,6 +58,12 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
             placement_pending = scene.get("placement_pending") is True
             if placement_pending and result.get("synonyx") is not None:
                 raise ValueError("preview conflicts with placement")
+            if placement_pending:
+                preview_checks = {rule["rule_id"]: _file_check_directions(rule)
+                                  for rule in expected if rule["type"] == "file"}
+                if (scene["preview_file_checks"] != preview_checks
+                        or json.loads(root.attrib["data-preview-file-checks"]) != preview_checks):
+                    raise ValueError("preview file checks mismatch")
             diagram_rules = [] if placement_pending else expected
             if (root.tag != "mxfile" or rows != json.loads(root.attrib["data-rule-rows"])
                     or len(rows) != len(diagram_rules)):
@@ -96,13 +107,7 @@ def artifact_conflicts(result: dict[str, Any], artifacts: dict[str, str]) -> lis
                 ):
                     raise ValueError("protocol mismatch")
                 if rule["type"] == "file":
-                    directions = [
-                        {key: direction[key] for key in (
-                            "from_network_id", "to_network_id", "checks_by_network",
-                        )}
-                        for direction in rule["directions"]
-                    ]
-                    if row.get("file_check_directions") != directions:
+                    if row.get("file_check_directions") != _file_check_directions(rule):
                         raise ValueError("file checks mismatch")
         return []
     except (ValueError, TypeError, KeyError, ParseError):

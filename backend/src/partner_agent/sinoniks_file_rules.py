@@ -132,6 +132,14 @@ class FileRule:
             "directions": [lane.as_dict() for lane in self.lanes],
         }
 
+    def check_directions(self) -> list[dict[str, object]]:
+        return [
+            {"from_network_id": lane.source.network_id,
+             "to_network_id": lane.destination.network_id,
+             "checks_by_network": lane.checks_by_network()}
+            for lane in self.lanes
+        ]
+
 
 @dataclass(frozen=True)
 class FileUserDetails:
