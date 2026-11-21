@@ -35,7 +35,10 @@ def usage_record(raw: Any) -> dict[str, Any]:
         "cached_tokens": token_count(prompt, "cached_tokens") if isinstance(prompt, dict) else None,
         "reasoning_tokens": (token_count(output, "reasoning_tokens")
                              if isinstance(output, dict) else None),
-        "provider_cost_usd": (str(data["cost"]) if type(data.get("cost")) in (int, float)
+        # Polza reports cost and cost_rub in RUB. Preserve numeric raw usage,
+        # but never relabel the rouble amount as USD.
+        "provider_cost_usd": (str(data["cost"]) if "cost_rub" not in data
+                              and type(data.get("cost")) in (int, float)
                               and numeric_usage(data["cost"]) is not None else None),
     }
 

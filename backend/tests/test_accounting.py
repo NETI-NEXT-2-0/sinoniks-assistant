@@ -81,3 +81,12 @@ def test_contest_mode_fails_closed_on_missing_or_expensive_declaration():
     values["model_input_usd_per_million"] = 0.100001
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **values)
+
+
+def test_polza_ruble_cost_is_retained_without_becoming_dollars():
+    usage = usage_record({"prompt_tokens": 13, "completion_tokens": 33,
+                          "cost": 0.00105897, "cost_rub": 0.00105897})
+    assert usage["provider_cost_usd"] is None
+    assert usage["raw"]["cost_rub"] == 0.00105897
+    assert usage_record(usage["raw"])["provider_cost_usd"] is None
+    assert priced_usage(usage, None, None)["estimated_cost_usd"] is None

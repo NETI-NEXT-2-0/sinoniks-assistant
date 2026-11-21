@@ -302,6 +302,13 @@ async def chat_completion(
                 "request": 0,
             },
         }
+    if settings.model_endpoint.rstrip("/") == "https://polza.ai/api/v1":
+        if not settings.model_provider_variant or settings.model_wire_api != "chat_completions":
+            raise ProviderError("provider_route_required")
+        payload["provider"] = {
+            "only": [settings.model_provider_variant],
+            "allow_fallbacks": False,
+        }
     async with track_model_call(settings) as captured:
         body: Any = None
         try:

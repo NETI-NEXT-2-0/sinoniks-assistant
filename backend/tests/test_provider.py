@@ -221,3 +221,34 @@ async def test_http_stream_enforces_total_limit_and_closes_transport(wire, lengt
                 chunks.append(part)
         assert len("".join(chunks)) == 6000
     assert closed == [True]
+
+
+@pytest.mark.parametrize("route", ["openai/flex", ""])
+async def test_polza_pins_declared_provider_without_fallback(route):
+    from partner_agent.runtime.provider import chat_completion
+
+    calls = []
+
+    def receive(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        assert body["model"] == "openai/gpt-6-luna"
+        assert body["provider"] == {"only": ["openai/flex"], "allow_fallbacks": False}
+        assert "max_price" not in body["provider"]  # Polza pricing is in RUB.
+        return httpx.Response(200, json={"choices": []})
+
+    settings = Settings(
+        _env_file=None, database_url="postgresql+psycopg://u:p@localhost/db",
+        runtime_profile="openai_compatible", model_endpoint="https://polza.ai/api/v1",
+        model_name="openai/gpt-6-luna", model_api_key="synthetic",
+        model_provider_variant=route,
+    )
+    if not route:
+        with pytest.raises(ProviderError, match="provider_route_required"):
+            await chat_completion(settings, [], client_factory=lambda **kwargs: httpx.AsyncClient(
+                transport=httpx.MockTransport(receive), **kwargs))
+        assert not calls
+    else:
+        await chat_completion(settings, [], client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=httpx.MockTransport(receive), **kwargs))
+        assert len(calls) == 1
