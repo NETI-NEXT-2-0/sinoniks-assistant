@@ -123,9 +123,11 @@ class LayoutContext:
         }
         if any(endpoint.usb for endpoint in (*senders, *receivers)):
             methods.add("USB")
-        if any(direction.methods_on(side.network_id)["manual"] is True
-               for direction in rule.lanes for side in (direction.source, direction.destination)):
-            methods.add("SFTP вручную")
+        for direction in rule.lanes:
+            for side in (direction.source, direction.destination):
+                manual = direction.manual_method_on(side.network_id)
+                if manual is not None:
+                    methods.add("SFTP вручную" if manual == "SFTP" else "Вручную")
         description = ", ".join(sorted(methods)) or "Файлы"
         return DisplayRule(
             rule.id, number, senders[0].side, list(dict.fromkeys(senders)),

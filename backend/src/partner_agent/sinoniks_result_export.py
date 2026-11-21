@@ -48,8 +48,9 @@ def export_file_rule(
             if methods["usb"] is True:
                 labels_on_side.add("USB-носитель на Узле А" if nodes.get(network_id) == "A"
                                    else "USB")
-            if methods["manual"] is True:
-                labels_on_side.add("SFTP, вручную")
+            manual = lane.manual_method_on(network_id)
+            if manual is not None:
+                labels_on_side.add("SFTP, вручную" if manual == "SFTP" else "Вручную")
             if setting is not None and setting.protocol is not None:
                 labels_on_side.add(f"{setting.protocol}, {setting.operation}")
             if network_id in nodes:
