@@ -55,6 +55,12 @@ def test_two_pulls_and_pushes_on_both_nodes_become_two_rules_and_two_users():
     assert [rule.direction for rule in result.rules] == ["forward", "forward"]
     expert = export_result(request, session_id="test-u01")
     assert expert["file_users_count"] == 2 and expert["file_users_range"] is None
+    details = expert["file_users_breakdown"]
+    assert details["manual"] == {"min": 0, "max": 0, "actors": []}
+    assert details["technical_pull_count"] == 2
+    assert {operation["storage_id"] for operation in details["technical_pulls"]} == {
+        "office-store", "plant-store",
+    }
     assert [(rule["from"], rule["to"], rule["protocol"]) for rule in expert["rules"]] == [
         ("office", "plant", {"office": "SFTP, PULL", "plant": "SFTP, PUSH"}),
         ("plant", "office", {"office": "SFTP, PUSH", "plant": "SFTP, PULL"}),
@@ -112,6 +118,12 @@ def test_covers_mixed_usb_and_icap_with_push_and_one_human():
     assert expert["schema_version"] == "1.1" and expert["session_id"] == "test-f07"
     assert expert["status"] == "completed" and expert["rules_count"] == 3
     assert expert["file_users_count"] == 1
+    assert expert["file_users_breakdown"] == {
+        "manual": {"min": 1, "max": 1, "actors": [{"id": "operator", "name": None}]},
+        "technical_pull_count": 0,
+        "technical_pulls": [],
+        "upper_unknown_reasons": [],
+    }
     mqtt = next(rule for rule in expert["rules"] if rule["protocol"] == "MQTT")
     assert mqtt["port"] is None and mqtt["mode"] == "two-way"
     file = next(rule for rule in expert["rules"] if rule["type"] == "file")
@@ -224,6 +236,13 @@ def test_unknown_methods_and_checks_never_become_a_certified_rule_count():
     assert expert["rules_count"] == len(expert["rules"])
     assert expert["confirmed_rules_count"] is None and expert["rules_lower_bound"] == 1
     assert expert["rules"][0]["protocol"] == {"office": None, "plant": None}
+    assert expert["rules_lower_bound_breakdown"] == {"data": 0, "file": 1}
+    assert {issue["reason"] for issue in expert["rules"][0]["provisional_reasons"]} == {
+        "file_checks_unknown", "file_visibility_unknown", "file_method_unknown_or_unavailable",
+    }
+    assert expert["file_users_breakdown"]["upper_unknown_reasons"] == [
+        "manual_upper_unknown", "file_rules_incomplete",
+    ]
 
 
 def test_expert_export_preserves_declared_initiator_and_known_user_range():
