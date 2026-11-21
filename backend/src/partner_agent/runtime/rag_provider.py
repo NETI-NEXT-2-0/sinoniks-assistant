@@ -308,8 +308,11 @@ def prepare_request(
         instruction += (
             " The user explicitly chose REFERENCE mode. Answer the informational question "
             "without creating or changing a project. Always return design=null; mode must be "
-            "grounded, insufficient or conversation. If project work is needed, explain that "
-            "the user can select Project mode to change or explain the saved project. "
+            "grounded, insufficient, conversation or project_explanation when a saved snapshot "
+            "is supplied. The current scheme is READ-ONLY context: use its actual protocols "
+            "and systems to answer follow-up educational questions. Use evidence for protocol "
+            "or product capabilities; the snapshot only proves the user-selected conditions. "
+            "If edits are requested, suggest Project mode instead. "
             "Do not infer project changes from history."
         )
     elif request_mode == "design":
@@ -339,8 +342,9 @@ def prepare_request(
         raise ProviderError("rag_history_invalid")
     turns = [{"role": item["role"], "content": item["content"]} for item in turns[-20:]]
     project = ""
-    if design_context is not None and request_mode != "reference":
-        label = ("New draft requirements (not yet saved)" if new_project
+    if design_context is not None:
+        label = ("Read-only saved project conditions" if request_mode == "reference" else
+                 "New draft requirements (not yet saved)" if new_project
                  else "Saved project conditions")
         project = "\n" + label + ":\n" + json.dumps(
             design_context, ensure_ascii=False, separators=(",", ":"),
@@ -485,7 +489,7 @@ async def answer_with_provider(
             raise ProviderError("provider_missing_grounded_citation")
         proposal = decoded.get("design")
         if request_mode == "reference" and (
-            mode in ("design", "project_explanation") or proposal is not None
+            mode == "design" or proposal is not None
         ):
             raise ProviderError("provider_request_mode_violation")
         if request_mode == "design" and mode not in (

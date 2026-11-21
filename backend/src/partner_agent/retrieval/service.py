@@ -1,5 +1,6 @@
 """Grant-aware offline lexical search; current PostgreSQL state is authoritative."""
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -253,17 +254,23 @@ async def search_answer_evidence(
     history: list[dict[str, str]],
     limit: int = 8,
 ) -> list[dict[str, Any]]:
-    """Prefer the current question; use history only as a bounded empty-search fallback."""
-    evidence = await search_knowledge(db, actor, question, limit=limit)
+    """Resolve short anaphoric follow-ups without overriding explicit identifiers."""
     _, identifiers = query_terms(question)
-    # Explicit identifiers belong to this question. An unknown new code must not
-    # silently retrieve an older code from conversation history instead.
-    if evidence or identifiers:
-        return evidence
     previous = next((item["content"] for item in reversed(history) if item["role"] == "user"), "")
-    if not previous or previous == question:
-        return evidence
+    # A generic word such as "works" can produce incidental hits. In a short
+    # follow-up those hits must not erase the explicit topic of the previous turn.
+    follow_up = len(question) <= 240 and bool(re.search(
+        r"\b(оно|он|она|это|этого|этой|его|её|такое|они|it|that)\b", question.casefold()
+    ))
     expanded = f"{previous}\n{question}"
+    if (follow_up and not identifiers and previous and previous != question
+            and len(expanded.encode()) <= 32768):
+        contextual = await search_knowledge(db, actor, expanded, limit=limit)
+        if contextual:
+            return contextual
+    evidence = await search_knowledge(db, actor, question, limit=limit)
+    if evidence or identifiers or not previous or previous == question:
+        return evidence
     if len(expanded.encode()) > 32768:
         return evidence
     return await search_knowledge(db, actor, expanded, limit=limit)

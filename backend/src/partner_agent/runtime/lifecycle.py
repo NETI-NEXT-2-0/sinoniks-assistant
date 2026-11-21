@@ -206,7 +206,7 @@ async def complete(
     async with session_factory()() as db:
         chat, run = await lock_run(db, ownership.run_id)
         if status == "succeeded" and outcome.get("answer_mode") == "project_explanation" and (
-            run.request_mode == "reference" or design_parent_id is None or design_input is not None
+            design_parent_id is None or design_input is not None
         ):
             raise APIError(409, "request_mode_violation", "Project explanation must be read-only")
         if status == "succeeded" and evidence is not None:

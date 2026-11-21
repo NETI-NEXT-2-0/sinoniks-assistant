@@ -84,13 +84,22 @@ async def execute_run(
                     context = await db.get(RunDesignContext, run_id)
                     if context is None:
                         raise APIError(409, "design_context_invalid", "Project context is missing")
-                    project = (None if current_run.request_mode == "reference" else
-                               await context_revision(db, current_run.chat_id, context))
+                    project = await context_revision(db, current_run.chat_id, context)
                     project_parent = project.id if project else None
                     if project is not None:
-                        history_sources = [*history_sources, *await project_evidence(
-                            db, actor, current_run.chat_id, project,
-                        )]
+                        try:
+                            validated_project_sources = await project_evidence(
+                                db, actor, current_run.chat_id, project,
+                            )
+                        except APIError as error:
+                            if (current_run.request_mode != "reference"
+                                    or error.code != "source_context_changed"):
+                                raise
+                            # Reference can still answer a general educational question.
+                            # Never expose a snapshot derived from revoked evidence.
+                            project, project_parent = None, None
+                        else:
+                            history_sources = [*history_sources, *validated_project_sources]
                     project_context = None
                     if project is not None:
                         from partner_agent.requirements_service import without_sources

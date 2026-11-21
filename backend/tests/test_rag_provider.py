@@ -23,10 +23,11 @@ def test_build_messages_and_validate_allowed_citation():
     assert result["answer"] == "Course"
 
 
-def test_reference_prompt_omits_explicit_project_context():
-    messages = build_messages("Product question", [], design_context={"network_a": "PRIVATE"},
+def test_reference_prompt_includes_only_readonly_project_context():
+    messages = build_messages("Product question", [], design_context={"network_a": "Saved plant"},
                               request_mode="reference")
-    assert "PRIVATE" not in str(messages) and "REFERENCE mode" in messages[0]["content"]
+    assert "Saved plant" in str(messages) and "REFERENCE mode" in messages[0]["content"]
+    assert "Read-only saved project conditions:" in messages[-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -222,7 +223,9 @@ async def test_prepared_request_cannot_override_explicit_reference_mode(monkeypa
 @pytest.mark.parametrize(("mode", "snapshot", "proposal", "error"), [
     ("auto", {"revision": 1}, None, None),
     ("design", {"revision": 1}, None, None),
-    ("reference", {"revision": 1}, None, "provider_request_mode_violation"),
+    ("reference", {"revision": 1}, None, None),
+    ("reference", None, None, "provider_request_mode_violation"),
+    ("reference", {"revision": 1}, {}, "provider_request_mode_violation"),
     ("auto", None, None, "provider_request_mode_violation"),
     ("design", {"pending_fields": ["x" * 32000]}, None, "provider_request_mode_violation"),
     ("auto", {"revision": 1}, {}, "provider_invalid_design_mode"),
@@ -232,7 +235,7 @@ async def test_project_explanation_requires_snapshot_and_cannot_propose_changes(
 ):
     async def model(settings, messages):
         assert ("Saved calculation snapshot:" in messages[-1]["content"]) == (
-            error != "provider_request_mode_violation"
+            snapshot is not None and len(json.dumps(snapshot)) < 32000
         )
         return {"choices": [{"message": {"content": json.dumps({
             "answer": "В схеме указан один получатель.",
