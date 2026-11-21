@@ -343,7 +343,9 @@ def prepare_request(
             "Null requirement_id means requirement-1, requirement-2, etc. by one-based position. "
             "If the snapshot lists pending fields instead of counts, explain the saved "
             "conditions and gaps. Do not recompute rules or fill unknowns. "
-            "Do not claim a minimum when evaluation_rule_count is absent or null. "
+            "For v3, counts.rules_count is the confirmed minimum; null means unconfirmed. "
+            "For legacy snapshots use counts.evaluation_rule_count if supplied. Never turn "
+            "an unknown confirmed minimum into zero. "
             "displayed_networks gives the actual saved diagram's left/right network IDs; "
             "use it to resolve phrases like the network on the right. Do not infer sides "
             "when this mapping is missing. "
@@ -355,15 +357,18 @@ def prepare_request(
         if not fits(messages_for([], [])):
             instruction = base_instruction
             calculation = ""
+    # Keep the latest complete exchange ahead of lower-priority search snippets.
+    # Otherwise a full evidence window can erase the question a short reply answers.
+    recent = turns[-2:] if len(turns) >= 2 and fits(messages_for([], turns[-2:])) else []
     selected_blocks: list[str] = []
     selected_evidence = []
     for block, item in zip(blocks, evidence, strict=True):
-        if not fits(messages_for([*selected_blocks, block], [])):
+        if not fits(messages_for([*selected_blocks, block], recent)):
             break
         selected_blocks.append(block)
         selected_evidence.append(item)
-    recent: list[dict[str, str]] = []
-    for index in range(len(turns) - 2, -1, -2):
+    start = len(turns) - (4 if recent else 2)
+    for index in range(start, -1, -2):
         candidate = [*turns[index:index + 2], *recent]
         if not fits(messages_for(selected_blocks, candidate)):
             break

@@ -348,6 +348,7 @@ export function RequirementsPanel({
           </nav>
           <section id="project-overview" hidden={section !== 'overview'}>
             {dirty && <p className="project-unsaved-note">Схема ниже относится к сохранённой версии. Сохраните изменённые условия, чтобы обновить расчёт.</p>}
+            {!!saved?.questions.length && <div className="project-next-steps"><h3>Есть параметры для уточнения</h3><p>В сохранённой версии {saved.questions.length} пунктов для проверки. Посмотрите их в условиях или уточните следующим сообщением в чате.</p><button type="button" onClick={() => setSection('requirements')}>Посмотреть условия</button></div>}
             {saved?.result ? <CalculatedProject auth={auth} chatId={chatId} revision={saved} onExpired={onExpired} /> : <div className="project-empty-result"><h3>Расчёта пока нет</h3><p>Укажите сети, системы и направления обмена. Неизвестные параметры можно оставить для уточнения в чате.</p><button type="button" onClick={() => setSection('requirements')}>Перейти к условиям</button></div>}
           </section>
           <section id="project-requirements" hidden={section !== 'requirements'}>

@@ -81,7 +81,11 @@ function DeveloperDiagnostics({ run }: { run: Run }) {
 }
 
 function RunState({ run }: { run: Run }) {
-  return <span className={`run-status run-${run.status}`}><i aria-hidden="true" />{labels[run.status]}{run.status === 'queued' && run.queue_position > 0 ? ` · ${run.queue_position}` : ''}</span>;
+  const code = isRecord(run.outcome) ? run.outcome.code : null;
+  const failureLabel = code === 'provider_request_timeout' ? 'Сервис модели не ответил'
+    : typeof code === 'string' && code.startsWith('provider_invalid_design') ? 'Изменение не применено'
+    : ['provider_unauthorized_citation', 'provider_invalid_citation_quote', 'provider_missing_grounded_citation', 'provider_invalid_rag_json'].includes(String(code)) ? 'Ответ не подтверждён' : labels.failed;
+  return <span className={`run-status run-${run.status}`}><i aria-hidden="true" />{run.status === 'failed' ? failureLabel : labels[run.status]}{run.status === 'queued' && run.queue_position > 0 ? ` · ${run.queue_position}` : ''}</span>;
 }
 
 export function Workspace({ user, auth, appearance, logout, logoutPending, onExpired, sessionError }: Props) {
@@ -242,7 +246,7 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
     return <div className="run-detail" key={run.id}>
       <RunState run={run} />
       {!terminal(run.status) && <button className="run-stop" aria-label={`Остановить выполнение ${run.queue_seq}`} onClick={() => { void space.cancel(run.id); }}><Icon name="stop" />Стоп</button>}
-      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p><DeveloperDiagnostics run={run} /></>}
+      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p>{selectedMessages.some(message => message.id === run.input_message_id) && <button type="button" disabled={!!space.command} onClick={() => { const message = selectedMessages.find(item => item.id === run.input_message_id); if (message) { space.setDraft(message.content); input.current?.focus(); } }}>Вставить текст запроса</button>}<DeveloperDiagnostics run={run} /></>}
       {run.status === 'cancelled' && <p className="run-explanation">Выполнение остановлено. Полученный фрагмент сохранён.</p>}
       {run.status === 'waiting_input' && <div className="clarification">
         <p>{run.clarification_question ?? 'Уточните запрос, чтобы продолжить.'}</p>

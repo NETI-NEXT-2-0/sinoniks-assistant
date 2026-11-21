@@ -57,6 +57,30 @@ export function CalculatedProject({
             ? "Ограничения проекта"
             : "Предварительный расчёт"}
       </h3>
+      <div className="design-actions project-result-actions">
+        {[
+          "json",
+          "txt",
+          ...(revision.artifact_sha256?.drawio ? ["drawio"] : []),
+        ].map((extension) => (
+          <button
+            type="button"
+            className={extension === 'drawio' ? 'project-download-primary' : undefined}
+            key={extension}
+            disabled={busy}
+            onClick={() => {
+              void download(extension);
+            }}
+          >
+            {extension === "json"
+              ? "Экспертный JSON"
+              : extension === "drawio"
+                ? "Схема draw.io"
+                : "Скачать пояснение"}
+          </button>
+        ))}
+      </div>
+
       <p>
         {result.confirmed_rules_count === null
           ? `Полный минимум не подтверждён. Нижняя оценка: ${result.rules_lower_bound}; в предварительном наборе: ${result.rules_count}.`
@@ -139,29 +163,6 @@ export function CalculatedProject({
           {result.explanation}
         </p>
       </details>
-      <div className="design-actions">
-        {[
-          "json",
-          "txt",
-          ...(revision.artifact_sha256?.drawio ? ["drawio"] : []),
-        ].map((extension) => (
-          <button
-            type="button"
-            className={extension === 'drawio' ? 'project-download-primary' : undefined}
-            key={extension}
-            disabled={busy}
-            onClick={() => {
-              void download(extension);
-            }}
-          >
-            {extension === "json"
-              ? "Экспертный JSON"
-              : extension === "drawio"
-                ? "Схема draw.io"
-                : "Скачать пояснение"}
-          </button>
-        ))}
-      </div>
       {error && <p role="alert">{error}</p>}
     </section>
   );
