@@ -53,7 +53,8 @@ def test_new_file_design_prompt_separates_usb_boundary_roles_and_people():
     assert "Never create a USB network" in instruction
     assert "kind=icap and icap_service=antivirus" in instruction
     assert "MQTT uses two-way transport" in instruction
-    assert "Departments, teams and access groups are not actors" in instruction
+    assert "Set classification='person' for an actual human" in instruction
+    assert "Set classification='group' for any department" in instruction
 
 
 def test_incomplete_file_exchange_guidance_is_available_without_a_saved_project():
