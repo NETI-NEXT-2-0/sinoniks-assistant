@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = Field(default=45.0, gt=0, allow_inf_nan=False)
     model_max_output_tokens: int = Field(default=3000, ge=128, le=12000)
     model_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
+    model_json_output: bool = False
     model_context_window_tokens: int = Field(default=0, ge=0, le=10_000_000)
     model_wire_api: Literal["chat_completions", "responses"] = "chat_completions"
     model_input_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)

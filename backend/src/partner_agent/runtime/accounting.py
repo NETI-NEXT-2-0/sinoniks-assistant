@@ -40,6 +40,7 @@ def tariff_snapshot(settings: Settings) -> dict[str, Any]:
         "catalog_id": settings.model_catalog_id or None,
         "provider_variant": settings.model_provider_variant or None,
         "reasoning_effort": settings.model_reasoning_effort,
+        "json_output": settings.model_json_output,
         "max_output_tokens": settings.model_max_output_tokens,
         "snapshot": settings.model_price_snapshot or None,
         "contest_mode": settings.model_contest_mode,

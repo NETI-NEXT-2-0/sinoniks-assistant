@@ -61,3 +61,30 @@ def test_blank_compose_reasoning_value_preserves_provider_default():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, database_url="postgresql+psycopg://localhost/test",
                  model_reasoning_effort="fast")
+
+
+@pytest.mark.parametrize('wire', ['chat_completions', 'responses'])
+@pytest.mark.parametrize('enabled', [False, True])
+async def test_json_output_is_opt_in_and_preserves_wire_contract(wire, enabled):
+    calls = []
+
+    def receive(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if enabled and wire == 'chat_completions':
+            assert body['response_format'] == {'type': 'json_object'} and 'text' not in body
+        elif enabled:
+            assert body['text'] == {'format': {'type': 'json_object'}}
+            assert 'response_format' not in body
+        else:
+            assert 'response_format' not in body and 'text' not in body
+        return httpx.Response(200, json={'choices': []})
+
+    settings = Settings(_env_file=None, database_url='postgresql+psycopg://localhost/test',
+                        runtime_profile='openai_compatible', model_endpoint='https://test.invalid/v1',
+                        model_name='synthetic', model_api_key='synthetic', model_wire_api=wire,
+                        model_json_output=enabled)
+    await chat_completion(settings, [{'role': 'system', 'content': 'Return JSON'}],
+                          client_factory=lambda **kw: httpx.AsyncClient(
+                              transport=httpx.MockTransport(receive), **kw))
+    assert len(calls) == 1 and tariff_snapshot(settings)['json_output'] is enabled

@@ -302,6 +302,11 @@ async def chat_completion(
             payload["reasoning_effort"] = settings.model_reasoning_effort
         else:
             payload["reasoning"] = {"effort": settings.model_reasoning_effort}
+    if settings.model_json_output:
+        if settings.model_wire_api == "chat_completions":
+            payload["response_format"] = {"type": "json_object"}
+        else:
+            payload["text"] = {"format": {"type": "json_object"}}
     if settings.model_contest_mode and settings.model_endpoint.rstrip("/") == ROUTER_ENDPOINT:
         payload["provider"] = {
             "order": [settings.model_provider_variant],
