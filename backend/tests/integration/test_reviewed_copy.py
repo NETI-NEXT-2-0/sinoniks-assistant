@@ -82,7 +82,9 @@ async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(
         path = f"/api/v1/knowledge/versions/{version_id}/approve"
         assert (await other.post(path, headers=other_headers, json=body)).status_code == 404
         assert (
-            await client.post(path, headers=headers, json={**body, "reviewed_text": " "})
+            await client.post(path, headers=headers, json={
+                **body, "reviewed_text": " ", "text_order_confirmed": quality,
+            })
         ).status_code == 422
         assert (
             await client.post(path, headers=headers, json={**body, "canonical_sha256": "f" * 64})

@@ -70,6 +70,19 @@ def test_two_pulls_and_pushes_on_both_nodes_become_two_rules_and_two_users():
     ]
 
 
+@pytest.mark.parametrize("gap", [{"checks": None}, {"received_files_shared": None}])
+def test_unknown_checks_or_access_do_not_invent_extra_push_users(gap):
+    request = plan([files(
+        "manual-push", side("office", manual=True, manual_protocol="SFTP",
+                            actor_ids=["operator"]),
+        side("plant", automations=[automation("PUSH", "plant")], **gap),
+    )])
+    result = calculate_file_rules(request, outside_network_id="office")
+    assert result.minimum is None and result.issues
+    assert result.declared_pulls == 0 and result.file_users_count == 1
+    assert result.user_details.upper_unknown_reasons == ()
+
+
 def test_unknown_checks_do_not_remove_proven_two_pull_lower_bound():
     request = plan([files(
         "sync",

@@ -424,7 +424,15 @@ def calculate_file_rules(
         int(bool(flows)), pulls, max(map(len, isolated_groups.values()), default=0),
         sum(not any(lane.provisional for lane in group) for group in matched),
     )
-    users, user_range, user_details = _user_counts(request, flows, pulls, bool(issues))
+    # Checks/access uncertainty can split rules, but creates no technical user
+    # when all transfer methods are known and no rule uses PULL. Keep the
+    # engineering result preliminary without discarding a known human count.
+    count_independent = {"file_checks_unknown", "file_check_scope_unconfirmed",
+                         "file_visibility_unknown", "usb_placement_unverified"}
+    user_incomplete = bool(issues) and (
+        pulls > 0 or any(issue.reason not in count_independent for issue in issues)
+    )
+    users, user_range, user_details = _user_counts(request, flows, pulls, user_incomplete)
     return FileCalculation(
         rules, list(dict.fromkeys(issues)), None if issues else len(rules),
         lower_bound, pulls, users, user_range, user_details,
