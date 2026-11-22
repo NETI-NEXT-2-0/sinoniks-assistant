@@ -13,6 +13,7 @@ import httpx
 
 from partner_agent.infra.settings import ROUTER_ENDPOINT, Settings
 from partner_agent.runtime.accounting import track_model_call
+from partner_agent.runtime.output_schema import current_output_schema
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 RESPONSE_CHUNK_BYTES = 64 * 1024
@@ -302,7 +303,17 @@ async def chat_completion(
             payload["reasoning_effort"] = settings.model_reasoning_effort
         else:
             payload["reasoning"] = {"effort": settings.model_reasoning_effort}
-    if settings.model_json_output:
+    schema = current_output_schema() if settings.model_structured_design_output else None
+    if schema is not None:
+        output_format = {"type": "json_schema", "name": "sinoniks_new_project", "strict": True,
+                         "schema": schema}
+        if settings.model_wire_api == "chat_completions":
+            payload["response_format"] = {"type": "json_schema", "json_schema": {
+                key: value for key, value in output_format.items() if key != "type"
+            }}
+        else:
+            payload["text"] = {"format": output_format}
+    elif settings.model_json_output:
         if settings.model_wire_api == "chat_completions":
             payload["response_format"] = {"type": "json_object"}
         else:

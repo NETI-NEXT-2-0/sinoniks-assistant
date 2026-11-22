@@ -27,6 +27,7 @@ from partner_agent.requirements_patch import (
 )
 from partner_agent.requirements_service import without_sources
 from partner_agent.runs.types import RequestMode
+from partner_agent.runtime.output_schema import new_project_output_schema, output_schema_scope
 from partner_agent.runtime.provider import (
     ProviderError,
     chat_completion,
@@ -661,7 +662,23 @@ async def answer_with_provider(
     if request.request_mode != request_mode:
         raise ProviderError("provider_request_mode_violation")
     evidence = request.evidence
-    body = await chat_completion(settings, request.messages)
+    schema = (new_project_output_schema(list(request.citation_aliases))
+              if settings.model_structured_design_output and request.new_project_id
+              and request.input_version == 3 else None)
+    messages = request.messages
+    if schema is not None:
+        messages = [{**messages[0], "content": messages[0]["content"] + (
+            " Structured new-project output follows the supplied JSON Schema. Omit design.id: "
+            "the server assigns it. All other facts and references still require validation."
+        )}, *messages[1:]]
+        # The grammar is also input: reserve its UTF-8 size below the existing cap.
+        schema_bytes = len(json.dumps(schema, ensure_ascii=False).encode())
+        message_bytes = sum(len(item["content"].encode()) + 64 for item in messages)
+        cap = min(256000, settings.model_context_window_tokens - settings.model_max_output_tokens)
+        if cap <= 0 or message_bytes + schema_bytes + 512 > cap:
+            raise ProviderError("rag_context_limit")
+    with output_schema_scope(schema):
+        body = await chat_completion(settings, messages)
     no_changes = False
     try:
         if settings.model_wire_api == "responses" and "output" in body:
@@ -716,6 +733,8 @@ async def answer_with_provider(
             if request.input_version == 3:
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
+                if schema is not None and request.new_project_id:
+                    proposal = {**proposal, "id": request.new_project_id}
                 proposal = normalize_optional_text(proposal)
                 normalize_note_entity_paths(proposal)
                 normalize_file_side_actor_ids(proposal)
