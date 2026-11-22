@@ -23,6 +23,8 @@ def test_schema_keeps_protected_side_at_project_level_and_no_model_provenance():
     root = definitions['Requirements19']['properties']
     assert 'id' not in root and 'protected_network_id' in root
     assert 'protected_network_id' not in definitions['FileFlow19']['properties']
+    assert definitions['FileFlow19']['properties']['sides']['minItems'] == 2
+    assert definitions['FileFlow19']['properties']['sides']['maxItems'] == 2
     assert 'sources' not in json.dumps(schema) and 'legacy' not in definitions
 
     def check(value):

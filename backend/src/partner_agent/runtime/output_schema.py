@@ -59,6 +59,21 @@ def requirements_schema() -> dict[str, Any]:
 def new_project_output_schema(handles: list[str]) -> dict[str, Any]:
     design = deepcopy(requirements_schema())
     definitions = design.pop("$defs", {})
+    # A new file exchange describes both device nodes, including an unknown
+    # profile. Omitting a side drops explicitly supplied USB/method facts.
+    file_sides = definitions["FileFlow19"]["properties"]["sides"]
+    file_sides.update(minItems=2, maxItems=2, description=(
+        "One profile for each of the two logical network sides. Include both even if "
+        "their methods are unknown (nullable fields); never omit the USB source profile."
+    ))
+    definitions["FileFlow19"]["properties"]["sender_network_id"]["description"] = (
+        "Logical source side. For USB attached to node A use the existing external-side "
+        "network ID. This does not put the USB device itself in that network."
+    )
+    definitions["FileSide19"]["properties"]["actor_ids"]["description"] = (
+        "IDs of the stated people manually transferring files on this side, including "
+        "a stated contractor bringing updates on USB. Reuse their root actors IDs."
+    )
     # Server-owned identity stays out of the model grammar. This also keeps the
     # compiled schema reusable across projects rather than unique for every UUID.
     design["properties"].pop("id")
