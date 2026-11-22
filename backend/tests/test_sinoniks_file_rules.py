@@ -1,8 +1,11 @@
 import json
+from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
 
+from partner_agent.project_answers import ProjectAnswer19, apply_answer, question_choices
+from partner_agent.requirements_input import bind_shared_file_checks
 from partner_agent.requirements_result import result_artifacts19
 from partner_agent.sinoniks_calculation import calculate_rules, solve_project
 from partner_agent.sinoniks_contract19 import Requirements19
@@ -82,6 +85,35 @@ def test_unknown_checks_do_not_remove_proven_two_pull_lower_bound():
     assert len(result.rules) == result.lower_bound == result.declared_pulls == 2
     assert result.minimum is None and result.file_users_count is None
     assert result.user_details.manual_upper == 0
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_u01_only_groups_explicitly_shared_unknown_checks(shared):
+    raw = plan([
+        files(
+            f"flow-{source}",
+            side(source, checks=None, automations=[automation("PULL", source)]),
+            side(target, checks=None, automations=[automation("PUSH", target)]),
+        )
+        for source, target in (("office", "plant"), ("plant", "office"))
+    ]).model_dump(mode="json")
+    question = "Проверки одинаковые, разделять доступ не нужно." if shared else "Уточните обмен."
+    bind_shared_file_checks(raw, question)
+    request = Requirements19.model_validate(raw)
+    choices = [item for item in question_choices(request) if item["field"].endswith("/checks")]
+    assert len(choices) == (1 if shared else 4)
+    first = choices[0]
+    answer = ProjectAnswer19(
+        base_revision_id=uuid4(), path=first["field"], target_id=first["target_id"],
+        side_network_id=first["side_network_id"], value=[{"kind": "signature"}],
+    )
+    updated = apply_answer(request, answer)
+    file_sides = [item for flow in updated.flows for item in flow.sides]
+    assert sum(item.checks is not None for item in file_sides) == (4 if shared else 1)
+    assert all(item.checks is None or item.checks[0].kind == "signature" for item in file_sides)
+    partial = calculate_file_rules(request, outside_network_id="office")
+    assert partial.lower_bound == partial.declared_pulls == 2
+    assert partial.user_details.manual_upper == 0 and partial.minimum is None
 
 
 def test_isolated_departments_require_two_rules_without_counting_each_as_person():

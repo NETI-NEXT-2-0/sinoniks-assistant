@@ -123,6 +123,7 @@ async def execute_run(
                         else:
                             history_sources = [*history_sources, *validated_project_sources]
                     project_context = None
+                    selection_context = None
                     if project is not None:
                         from partner_agent.requirements_service import without_sources
 
@@ -130,9 +131,11 @@ async def execute_run(
                         if answer_command is not None:
                             if project.id != answer_command.base_revision_id:
                                 raise APIError(409, "design_revision_conflict", "Reload answers")
-                            project_context = without_sources(apply_answer(
-                                Requirements19.model_validate(project.input), answer_command,
-                            ).model_dump(mode="json"))
+                            selection_context = Requirements19.model_validate(project.input)
+                            selected = apply_answer(selection_context, answer_command)
+                            project_context = without_sources(
+                                selected.model_dump(mode="json"),
+                            )
                     elif answer_command is not None:
                         raise APIError(409, "design_revision_conflict", "Project unavailable")
                     new_project = bool(
@@ -188,6 +191,7 @@ async def execute_run(
                                 raise ValueError("Requirements v3 expected")
                             result["design"] = reapply_structured_answers(
                                 result["design"], answer_command,
+                                selection_context=selection_context,
                             )
                         except (ValidationError, APIError, ValueError):
                             raise ProviderError("provider_invalid_design_answer",

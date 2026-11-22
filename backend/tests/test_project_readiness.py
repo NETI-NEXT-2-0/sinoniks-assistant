@@ -219,4 +219,4 @@ def test_out_of_scope_request_is_a_limitation_not_a_completed_solution():
     report = result["readiness"]
     assert report["status"] == "unsupported"
     assert report["limitations"] and not report["conflicts"]
-    assert report["checks"][1]["status"] == "pending"
+    assert {check["code"]: check["status"] for check in report["checks"]}["minimum"] == "pending"

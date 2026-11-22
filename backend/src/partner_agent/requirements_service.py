@@ -119,6 +119,7 @@ def requirements_questions(conditions: Requirements19) -> list[dict[str, Any]]:
         if placement else {}
     )
     result = []
+    shared_checks = {fields[0][0] for fields in conditions.pending_check_groups()}
     for issue in assess(conditions).issues:
         segments = issue.path.split("/")
         entity = None
@@ -132,6 +133,8 @@ def requirements_questions(conditions: Requirements19) -> list[dict[str, Any]]:
             if side.network_id in nodes:
                 location.append(nodes[side.network_id])
             label = f"{label.rstrip('.')} ({', '.join(location)})"
+            if issue.path in shared_checks:
+                label = "Общий профиль проверок"
             if segments[-1] == "received_files_shared" and side.access_group:
                 message = (
                     f"Могут ли участники группы «{side.access_group}» видеть общие файлы?"
