@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -294,7 +295,10 @@ async def chat_completion(
         payload = {"model": settings.model_name, "messages": messages, "stream": False,
                    "max_tokens": settings.model_max_output_tokens}
     if settings.model_reasoning_effort is not None:
-        if settings.model_wire_api == "chat_completions":
+        # Polza silently ignores OpenAI's top-level reasoning_effort.
+        # Its unified API requires reasoning.effort on both wire formats.
+        polza = urlsplit(settings.model_endpoint).hostname in {"polza.ai", "api.polza.ai"}
+        if settings.model_wire_api == "chat_completions" and not polza:
             payload["reasoning_effort"] = settings.model_reasoning_effort
         else:
             payload["reasoning"] = {"effort": settings.model_reasoning_effort}
