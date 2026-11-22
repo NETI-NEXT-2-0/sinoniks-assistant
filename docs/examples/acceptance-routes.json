@@ -1,0 +1,22 @@
+{
+  "routes": [
+    {
+      "model_id": "qwen/qwen3-30b-a3b-instruct-2507",
+      "provider_variant": "dekallm",
+      "snapshot": "2026-11-21T05:37:29Z",
+      "input_usd_per_million": "0.09",
+      "output_usd_per_million": "0.30",
+      "context_window_tokens": 262144,
+      "max_output_tokens": 3000
+    },
+    {
+      "model_id": "qwen/qwen3-30b-a3b-instruct-2507",
+      "provider_variant": "siliconflow/fp8",
+      "snapshot": "2026-11-21T05:37:29Z",
+      "input_usd_per_million": "0.09",
+      "output_usd_per_million": "0.30",
+      "context_window_tokens": 262144,
+      "max_output_tokens": 3000
+    }
+  ]
+}

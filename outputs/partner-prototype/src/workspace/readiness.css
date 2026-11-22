@@ -1,0 +1,17 @@
+.project-readiness { margin: 20px 0; padding: 20px 0; border-block: 1px solid var(--stroke); }
+.project-readiness h4 { margin: 0 0 8px; font-size: 17px; line-height: 1.45; }
+.project-readiness p, .readiness-legacy { margin: 8px 0 16px; color: var(--secondary); line-height: 1.6; }
+.project-readiness details { margin-top: 12px; }
+.project-readiness summary { cursor: pointer; min-height: 44px; padding: 10px 0; color: var(--ink); }
+.project-readiness summary span { color: var(--secondary); }
+.project-readiness ul { margin: 8px 0 16px; padding-left: 20px; }
+.project-readiness li { margin: 12px 0; overflow-wrap: anywhere; line-height: 1.6; }
+.project-readiness li strong, .project-readiness li small { display: block; }
+.project-readiness li strong { font-weight: 600; }
+.project-readiness li small { color: var(--secondary); margin-top: 4px; font-size: 13px; }
+.project-readiness .readiness-checks { list-style: none; padding: 0; }
+.readiness-checks li { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
+.readiness-checks span { min-width: 180px; color: var(--secondary); }
+.readiness-conflict h4, .readiness-unsupported h4 { color: var(--error, #FFB4A2); }
+.project-readiness summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+@media (max-width: 760px) { .project-readiness { padding-block: 16px; } .readiness-checks li { gap: 4px; } }

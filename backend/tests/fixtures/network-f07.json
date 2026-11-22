@@ -1,0 +1,38 @@
+{
+  "id": "acceptance-mixed",
+  "networks": [
+    {"id": "office", "name": "Офис", "trust": "open"},
+    {"id": "plant", "name": "Цех", "trust": "closed"}
+  ],
+  "systems": [
+    {"id": "office-mqtt", "name": "Брокер офиса", "network_id": "office"},
+    {"id": "plant-mqtt", "name": "Брокер цеха", "network_id": "plant"},
+    {"id": "clock", "name": "Сервер времени", "network_id": "office"},
+    {"id": "clock-client", "name": "Часы цеха", "network_id": "plant"},
+    {"id": "usb", "name": "USB обновлений", "kind": "usb", "attachment": "node-A"},
+    {"id": "store", "name": "Файловый сервер", "kind": "storage", "network_id": "plant"}
+  ],
+  "actors": [{"id": "contractor", "name": "Подрядчик"}],
+  "manual_users": {"lower": 1, "upper": 1},
+  "flows": [
+    {"id": "sensors", "kind": "data", "sender_network_id": "plant",
+      "receiver_network_id": "office", "sender_ids": ["plant-mqtt"],
+      "receiver_ids": ["office-mqtt"], "protocol": "MQTT", "mode": "two-way",
+      "purpose": "Показания датчиков"},
+    {"id": "time", "kind": "data", "sender_network_id": "office",
+      "receiver_network_id": "plant", "sender_ids": ["clock"],
+      "receiver_ids": ["clock-client"], "protocol": "UDP", "destination_port": 123,
+      "mode": "one-way", "application": "ntp", "purpose": "Точное время"},
+    {"id": "updates", "kind": "file", "direction": "forward",
+      "sender_network_id": "office", "receiver_network_id": "plant",
+      "sender_ids": ["usb"], "receiver_ids": ["store"], "purpose": "Обновления",
+      "sides": [
+        {"network_id": "office", "manual": false, "usb": true,
+          "actor_ids": ["contractor"], "received_files_shared": true,
+          "checks": [{"kind": "icap", "icap_service": "antivirus"}]},
+        {"network_id": "plant", "manual": false, "usb": false,
+          "received_files_shared": true, "checks": [],
+          "automations": [{"operation": "PUSH", "protocol": "SMB", "storage_id": "store"}]}
+      ]}
+  ]
+}

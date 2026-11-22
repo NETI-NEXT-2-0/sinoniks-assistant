@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  UV_VERSION: '0.13.7'
+  PARTNER_RUNTIME_PROFILE: offline_fixture
+
+jobs:
+  quality:
+    name: Code and client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: outputs/partner-prototype/package-lock.json
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: bash init.sh setup
+      - run: bash init.sh check
+
+  security:
+    name: Secrets and workflow safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: uv tool run --from zizmor==1.32.0 zizmor --offline .github/workflows
+      - name: Scan history for credentials
+        env:
+          ARCHIVE_SHA256: 79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 --output "$RUNNER_TEMP/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz
+          echo "$ARCHIVE_SHA256  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact
+
+  postgres:
+    name: PostgreSQL contracts
+    if: ${{ github.base_ref == 'main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.9-bookworm@sha256:47f917f7409eacd22fc5dfb1dee634e1b55cf0c01d1a7eb701be2227a03e0641
+        env:
+          POSTGRES_PASSWORD: synthetic-ci-password
+          POSTGRES_DB: partner_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d partner_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      PARTNER_DATABASE_URL: postgresql+psycopg://partner:synthetic-ci-password@127.0.0.1:5432/partner_test
+      PARTNER_TEST_DATABASE_URL: postgresql+psycopg://partner:synthetic-ci-password@127.0.0.1:5432/partner_test
+      CI_DATABASE_ADMIN_URL: postgresql://postgres:synthetic-ci-password@127.0.0.1:5432/postgres
+      PARTNER_ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: uv sync --project backend --locked --group dev
+      - name: Prepare disposable database
+        run: |
+          uv run --project backend --no-sync python scripts/ci/prepare-database.py
+          uv run --project backend --no-sync alembic -c backend/alembic.ini upgrade head
+          uv run --project backend --no-sync alembic -c backend/alembic.ini check
+          uv run --project backend --no-sync python -m partner_agent.infra.provision
+      - name: Run database contracts
+        run: uv run --project backend --no-sync pytest -c backend/pyproject.toml -q --strict-markers backend/tests -m 'integration and not storage and not parser'
+
+  containers:
+    name: Container acceptance
+    if: ${{ github.base_ref == 'main' }}
+    needs: [quality, postgres, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: partner-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - run: python -m pip install "uv==$UV_VERSION"
+      - run: uv sync --project backend --locked --group dev
+      - run: uv run --project backend --no-sync python scripts/ci/stack.py prepare
+      - run: uv run --project backend --no-sync python scripts/ci/stack.py start
+      - run: uv run --project backend --no-sync python scripts/ci/stack.py integration
+      - name: Browser acceptance
+        id: browser
+        run: uv run --project backend --no-sync python scripts/ci/release-checks.py browser
+      - name: Recovery acceptance
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: uv run --project backend --no-sync python scripts/ci/release-checks.py recovery
+      - name: Isolated conversion acceptance
+        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
+        run: uv run --project backend --no-sync python scripts/ci/release-checks.py conversion
+      - name: Collect container states
+        if: always()
+        run: uv run --project backend --no-sync python scripts/ci/stack.py diagnostics
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: container-states-${{ github.run_id }}
+          path: .local/ci-report/
+          retention-days: 3
+      - name: Remove disposable stack
+        if: always()
+        run: uv run --project backend --no-sync python scripts/ci/stack.py clean
+
+  required:
+    name: ${{ github.base_ref == 'main' && 'release-required' || 'required' }}
+    if: always()
+    needs: [quality, postgres, containers, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require successful checks
+        env:
+          STACK: ${{ needs.containers.result }}
+          RELEASE_PR: ${{ github.base_ref == 'main' }}
+          SECURITY: ${{ needs.security.result }}
+          QUALITY: ${{ needs.quality.result }}
+          POSTGRES: ${{ needs.postgres.result }}
+        run: |
+          test "$SECURITY" = success
+          test "$QUALITY" = success
+          if [ "$RELEASE_PR" = true ]; then
+            test "$POSTGRES" = success
+            test "$STACK" = success
+          else
+            test "$POSTGRES" = skipped
+            test "$STACK" = skipped
+          fi

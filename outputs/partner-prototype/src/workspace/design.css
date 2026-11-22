@@ -1,0 +1,111 @@
+.design-overlay{position:fixed;inset:0;z-index:160;background:var(--page);color:var(--ink)}
+.design-panel{height:100dvh;display:flex;flex-direction:column;outline:none}
+.design-header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 30px;border-bottom:1px solid var(--stroke)}
+.design-header h2{font-size:23px}.design-header p{margin-top:5px;font-size:12px;color:var(--secondary)}
+.design-content{overflow:auto;padding:24px clamp(16px,5vw,80px);flex:1}
+.design-content form,.design-result{max-width:1100px;margin:0 auto 24px}
+.design-content fieldset{border:1px solid var(--stroke);border-radius:12px;padding:18px;margin:0 0 18px;min-width:0}
+.design-content legend{padding:0 6px;font-size:14px;font-weight:600}
+.design-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:14px}
+.design-fields label{display:grid;gap:6px;font-size:12px;min-width:0}
+.design-fields :is(input,select){width:100%;min-width:0;min-height:38px;padding:8px 10px;background:var(--page);color:var(--ink);border:1px solid var(--stroke);border-radius:7px;font:inherit}
+.design-panel button{padding:9px 13px;border:1px solid var(--stroke);border-radius:7px;font-size:12px;background:var(--page);color:var(--ink)}
+.design-panel button:disabled{opacity:.5;cursor:default}
+.design-panel button[type=submit]{background:var(--accent);color:#242424;border-color:var(--accent)}
+.design-content fieldset>button{margin-top:12px}.design-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.design-error{max-width:1100px;margin:0 auto 18px;border:1px solid #b7543f;padding:12px;font-size:13px;line-height:1.6}
+.design-error button{margin-left:10px}.design-result{border-top:1px solid var(--stroke);padding-top:20px}
+.design-result h3{font-size:18px}.design-result p,.design-result li{font-size:13px;line-height:1.7;margin-top:8px}
+.design-path{display:flex;list-style:none;padding:0;gap:0;overflow-x:auto;margin:16px 0}
+.design-path li{display:flex;align-items:center;flex:1;min-width:120px;max-width:230px;overflow-wrap:anywhere}
+.design-path li+li:before{content:'—';margin:0 12px;color:var(--secondary)}
+.design-table{overflow-x:auto;margin:16px 0;border:1px solid var(--stroke);border-radius:8px}
+.design-table table{white-space:normal;font-size:12px}.design-table td{min-width:160px;vertical-align:top}
+.design-table :is(th,td):nth-child(2){background:transparent;color:inherit;font-weight:inherit}
+.design-explanation{white-space:pre-wrap}.design-result summary{cursor:pointer;font-size:13px}
+@media(max-width:600px){.design-header{padding:16px}.design-header h2{font-size:19px}}
+.design-chat-card{margin:20px 0;padding:16px;border:1px solid var(--stroke);border-radius:12px;font-size:13px}
+.design-chat-card p{margin:8px 0;color:var(--secondary);line-height:1.6}
+.design-chat-card>div{display:flex;flex-wrap:wrap;gap:8px}.design-chat-card button{padding:7px 11px;border:1px solid var(--stroke);border-radius:7px;background:var(--page);color:var(--ink);font:inherit}
+.design-chat-card button:disabled{opacity:.5;cursor:default}
+
+
+.requirements-panel .design-fields { align-items: start; }
+.requirements-panel .design-fields input,
+.requirements-panel .design-fields select:not([multiple]) { min-height: 40px; }
+.requirements-panel .design-fields select[multiple] { min-height: 84px; }
+
+/* Requirements and result panels keep their existing model and exports. */
+.design-header { padding: 24px 32px; background: var(--panel); }
+.design-header h2 { font-size: 24px; }
+.design-header p { font-size: 14px; line-height: 1.65; }
+.design-content { padding: 32px; overscroll-behavior: contain; }
+.design-content form, .design-result { max-width: 1160px; margin-bottom: 32px; }
+.design-content fieldset { padding: 24px; margin-bottom: 24px; border-radius: 12px; }
+.design-content legend { font-size: 16px; padding-inline: 8px; }
+.design-fields { gap: 16px; }
+.design-fields label { font-size: 14px; gap: 8px; line-height: 1.6; }
+.design-fields :is(input,select) { min-height: 44px; padding: 12px; background: var(--panel); border-radius: 8px; }
+.design-panel button { min-height: 44px; padding: 12px 16px; font-size: 14px; border-radius: 8px; }
+.design-panel button:hover { background: var(--raised); }
+.design-panel button[type=submit] { color: var(--accent-ink); }
+.design-panel button[type=submit]:hover { background: var(--hover); }
+.design-actions { gap: 8px; margin-block: 24px; }
+.design-error { padding: 16px; font-size: 14px; border: 1px solid #b77665; border-radius: 8px; color: #ffb4a2; background: #392b29; }
+.design-result { padding-top: 24px; }
+.design-result h3 { font-size: 20px; }
+.design-result p, .design-result li { font-size: 14px; line-height: 1.7; }
+.design-table { margin-block: 24px; border-radius: 8px; }
+.design-table table { font-size: 14px; }
+.design-table :is(th,td) { padding: 12px 16px; }
+.design-result summary { font-size: 14px; min-height: 44px; padding-block: 12px; }
+.design-chat-card { padding: 24px 0; border: 0; border-top: 1px solid var(--stroke); border-radius: 0; }
+.design-chat-card p { font-size: 14px; }
+.design-chat-card button { min-height: 44px; padding: 12px; font-size: 14px; }
+@media (max-width: 760px) {
+ .design-header { padding: 16px; flex-wrap: wrap; }
+ .design-content { padding: 24px 16px; }
+ .design-content fieldset { padding: 16px; }
+ .design-fields :is(input,select) { font-size: 16px; }
+}
+
+/* Project workbench: one saved result and a separate, persistent editor. */
+.project-workbench { max-width: 1224px; width: 100%; margin-inline: auto; }
+.project-workbench>p { font-size: 14px; line-height: 1.65; color: var(--secondary); }
+.project-header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.design-panel .project-save, .design-panel .project-download-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.design-panel .project-save:hover, .design-panel .project-download-primary:hover { background: var(--hover); }
+.project-version-status { padding: 12px 0; }
+.project-version-status.has-changes { color: var(--accent-text); }
+.project-sections { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 16px; border-bottom: 1px solid var(--stroke); }
+.project-sections button[aria-pressed=true] { background: var(--raised); border-color: var(--accent-text); }
+.project-workbench [hidden] { display: none; }
+.project-workbench .design-result { border-top: 0; padding-top: 0; }
+.project-workbench .design-actions { margin-block: 16px; }
+.project-editor-intro { margin-bottom: 24px; max-width: 72ch; }
+.project-editor-intro h3, .project-empty-result h3 { font-size: 24px; margin: 0 0 12px; }
+.project-editor-intro p, .project-empty-result p { color: var(--secondary); font-size: 14px; line-height: 1.7; }
+.project-empty-result { padding: 24px 0; max-width: 68ch; }
+.project-empty-result button { margin-top: 16px; }
+.project-unsaved-note { padding: 16px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; font-size: 14px; line-height: 1.65; }
+.calculated-project .diagram-viewer .diagram-rule-table { display: none; }
+.project-workbench .design-fields:has(> label:nth-child(3)) { row-gap: 20px; }
+.project-workbench fieldset { background: var(--panel); }
+.project-workbench fieldset fieldset { background: transparent; }
+.project-workbench .design-fields input, .project-workbench .design-fields select { background: var(--page); }
+@media (max-width:760px) {
+ .project-header-actions { width: 100%; }
+ .project-header-actions button { flex: 1; }
+ .project-sections { gap: 8px; }
+ .project-sections button { flex: 1; }
+ .project-workbench .design-fields { row-gap: 20px; }
+}
+
+.project-workbench fieldset>.design-fields+.design-fields { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--stroke); }
+.project-result-actions { margin-bottom: 24px; }
+.project-next-steps { padding: 20px; margin-bottom: 24px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; }
+.project-next-steps h3 { font-size: 20px; margin: 0 0 12px; }
+.project-next-steps p { color: var(--secondary); font-size: 14px; line-height: 1.65; }
+.project-next-steps button { margin-top: 16px; }
+.project-workbench .diagram-viewer svg { height: min(62vh, 620px); min-height: 380px; }
+@media(max-width:760px) { .project-workbench .diagram-viewer svg { height: 380px; min-height: 0; } }

@@ -1,0 +1,52 @@
+logging {
+  level  = "warn"
+  format = "json"
+}
+
+// Technical self-metrics only: no user, run or trace IDs in labels.
+prometheus.scrape "infrastructure" {
+  targets = [
+    {"__address__" = "alloy:12345", "service" = "alloy"},
+    {"__address__" = "loki:3100", "service" = "loki"},
+  ]
+  scrape_interval = "30s"
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+    queue_config {
+      capacity          = 1000
+      max_shards        = 2
+      max_samples_per_send = 200
+    }
+  }
+  wal {
+    max_keepalive_time = "1h"
+  }
+}
+
+// Explicit allowlisted technical bootstrap file. No Docker socket or app logs.
+loki.source.file "bootstrap" {
+  targets = [{"__path__" = "/etc/alloy/bootstrap-input.jsonl", "job" = "bootstrap"}]
+  forward_to = [loki.process.technical.receiver]
+}
+
+loki.process "technical" {
+  stage.static_labels {
+    values = {"service" = "observability", "pipeline" = "sanitized-v1"}
+  }
+  // Replace the complete line: content can never be copied from this input.
+  stage.replace {
+    expression = "^(.*)$"
+    replace    = "technical.bootstrap"
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -1,0 +1,193 @@
+import { projectSourceError } from "./projectErrors";
+import { useState } from "react";
+import { ApiError, type AuthClient } from "../api/client";
+import type { RequirementsRevision } from "../api/requirements";
+import { DiagramViewer } from "./DiagramViewer";
+import { ProjectReadiness } from "./ProjectReadiness";
+
+function countRange({ min, max }: { min: number; max: number | null }): string {
+  if (max === min) return String(min);
+  return max === null ? `не менее ${min}` : `${min}–${max}`;
+}
+
+export function CalculatedProject({
+  auth,
+  chatId,
+  revision,
+  onExpired,
+}: {
+  auth: AuthClient;
+  chatId: string;
+  revision: RequirementsRevision;
+  onExpired: () => void;
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const result = revision.result;
+  if (!result) return null;
+  const network = (id: string): string =>
+    result.networks.find((item) => item.id === id)?.name ?? "Сеть без названия";
+  const users = result.file_users_count;
+  const userRange = result.file_users_range;
+  const userCount = users !== null ? String(users) : userRange ? countRange(userRange) : "неизвестно";
+  const userDetails = result.file_users_breakdown;
+  async function download(extension: string): Promise<void> {
+    setBusy(true);
+    setError("");
+    try {
+      const query = extension === "json" ? "?include_accounting=true" : "";
+      const file = await auth.download(
+        `/chats/${chatId}/designs/${revision.id}/download/${extension}${query}`,
+      );
+      const url = URL.createObjectURL(file.blob),
+        a = document.createElement("a");
+      a.href = url;
+      a.download = `sinoniks-v${revision.revision}.${extension}`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) onExpired();
+      else setError(projectSourceError(failure) ?? "Не удалось скачать сохранённый результат.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="design-result calculated-project" aria-label="Расчёт Синоникса 1.9">
+      <ProjectReadiness report={result.readiness} />
+      <h3>
+        {result.status === "completed"
+          ? "Расчёт по заданным условиям"
+          : result.status === "unsupported"
+            ? "Ограничения проекта"
+            : "Предварительный расчёт"}
+      </h3>
+      <div className="design-actions project-result-actions">
+        {[
+          "json",
+          "txt",
+          ...(revision.artifact_sha256?.drawio ? ["drawio"] : []),
+        ].map((extension) => (
+          <button
+            type="button"
+            className={extension === 'drawio' ? 'project-download-primary' : undefined}
+            key={extension}
+            disabled={busy}
+            onClick={() => {
+              void download(extension);
+            }}
+          >
+            {extension === "json"
+              ? "Экспертный JSON"
+              : extension === "drawio"
+                ? "Схема draw.io"
+                : "Скачать пояснение"}
+          </button>
+        ))}
+      </div>
+
+      <p>
+        {result.confirmed_rules_count === null
+          ? `Полный минимум не подтверждён. Нижняя оценка: ${result.rules_lower_bound}; в предварительном наборе: ${result.rules_count}.`
+          : `Минимальное число правил Синоникса: ${result.confirmed_rules_count}.`}
+      </p>
+      {result.confirmed_rules_count === null && result.rules_lower_bound_breakdown && (
+        <p>
+          В нижней оценке {result.rules_lower_bound_breakdown.data} правил данных
+          и {result.rules_lower_bound_breakdown.file} файловых.
+        </p>
+      )}
+      <p>Пользователей передачи файлов: {userCount}.</p>
+      {userDetails && revision.input.flows.some((flow) => flow.kind === "file") && (
+        <p>
+          Ручных пользователей — {countRange(userDetails.manual)}
+          {userDetails.manual.actors.length > 0 &&
+            ` (${userDetails.manual.actors.map((actor) => actor.name || actor.id).join(", ")})`}.
+          Технических пользователей по операциям PULL — {userDetails.technical_pull_count}.
+        </p>
+      )}
+      {revision.artifact_sha256?.diagram ? (
+        <DiagramViewer
+          auth={auth}
+          chatId={chatId}
+          revisionId={revision.id}
+          onExpired={onExpired}
+        />
+      ) : (
+        <p>
+          У этой ревизии нет сохранённой схемы. Доступны расчёт и пояснение.
+        </p>
+      )}
+      {result.rules.length > 0 && <div
+        className="diagram-rule-table"
+        role="region"
+        aria-label="Рассчитанные правила 1.9"
+        tabIndex={0}
+      >
+        <table>
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Назначение</th>
+              <th>Направление и режим</th>
+              <th>Протокол и проверки</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.rules.map((rule) => (
+              <tr key={rule.rule_id}>
+                <td>{rule.id}</td>
+                <td>
+                  {rule.description}
+                  {Object.entries(rule.directions?.[0]?.access_groups ?? {})
+                    .filter(([, group]) => group !== null)
+                    .map(([id, group]) => (
+                      <div key={id}>Группа доступа ({network(id)}): {group}</div>
+                    ))}
+                </td>
+                <td>
+                  {network(rule.from)} {rule.mode === "two-way" ? "↔" : "→"}{" "}
+                  {network(rule.to)}
+                  <br />
+                  {rule.mode === "two-way" ? "С ответом" : "Односторонний"}
+                </td>
+                <td>
+                  {rule.type === "data"
+                    ? `${typeof rule.protocol === "string" ? rule.protocol : "Не уточнён"} / ${rule.port ?? "порт не задан"}`
+                    : Object.entries(
+                        typeof rule.protocol === "object" && rule.protocol
+                          ? rule.protocol
+                          : {},
+                      )
+                        .map(
+                          ([id, method]) =>
+                            `${network(id)}: ${method ?? "не уточнён"}`,
+                        )
+                        .join("; ")}
+                  {rule.checks?.length ? (
+                    <>
+                      <br />
+                      {rule.checks.join(", ")}
+                    </>
+                  ) : null}
+                  {rule.provisional_reasons?.map((issue) => (
+                    <div key={JSON.stringify([issue.flow_id, issue.network_id, issue.reason])}>
+                      {issue.label}{issue.network_id && ` (${network(issue.network_id)})`}
+                    </div>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>}
+      <details open>
+        <summary>Почему система размещена так</summary>
+        <p className="prose" style={{ whiteSpace: "pre-wrap" }}>
+          {result.explanation}
+        </p>
+      </details>
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}

@@ -1,0 +1,23 @@
+ARG PYTHON_IMAGE=python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+FROM ${PYTHON_IMAGE} AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 UV_CACHE_DIR=/tmp/uv-cache UV_LINK_MODE=copy UV_CONCURRENT_DOWNLOADS=4 UV_HTTP_TIMEOUT=120
+WORKDIR /app
+COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /usr/local/bin/uv
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN --mount=type=cache,target=/tmp/uv-cache uv sync --frozen --no-dev --no-install-project
+COPY backend/src ./src
+COPY backend/migrations ./migrations
+COPY backend/alembic.ini ./
+RUN --mount=type=cache,target=/tmp/uv-cache uv sync --frozen --no-dev && useradd --uid 10001 --create-home partner && chown -R partner:partner /app
+USER partner
+ENV PATH=/app/.venv/bin:$PATH
+CMD ["uvicorn", "partner_agent.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+FROM runtime AS tests
+USER root
+COPY backend/tests ./tests
+COPY parser/*.py /parser/
+COPY infra/test-entrypoint.py ./test-entrypoint.py
+RUN --mount=type=cache,target=/tmp/uv-cache uv sync --frozen && chown -R partner:partner /app
+USER partner
+CMD ["python", "test-entrypoint.py"]
