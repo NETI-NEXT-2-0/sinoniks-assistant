@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     model_api_key: SecretStr = SecretStr("")
     model_timeout_seconds: float = Field(default=45.0, gt=0, allow_inf_nan=False)
     model_max_output_tokens: int = Field(default=3000, ge=128, le=12000)
+    model_reasoning_effort: Literal["low", "medium", "high"] | None = None
     model_context_window_tokens: int = Field(default=0, ge=0, le=10_000_000)
     model_wire_api: Literal["chat_completions", "responses"] = "chat_completions"
     model_input_usd_per_million: float = Field(default=0.0, ge=0, allow_inf_nan=False)
@@ -59,6 +60,11 @@ class Settings(BaseSettings):
     runtime_graph_version: str = "fixture-v1"
     runtime_fixture_chunk_size: int = 24
     runtime_fixture_delay_seconds: float = 0.1
+
+    @field_validator("model_reasoning_effort", mode="before")
+    @classmethod
+    def optional_reasoning_effort(cls, value: object) -> object:
+        return None if value == "" else value
 
     @field_validator("design_input_version", mode="before")
     @classmethod

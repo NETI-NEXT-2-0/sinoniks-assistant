@@ -293,6 +293,11 @@ async def chat_completion(
     if settings.model_wire_api == "chat_completions":
         payload = {"model": settings.model_name, "messages": messages, "stream": False,
                    "max_tokens": settings.model_max_output_tokens}
+    if settings.model_reasoning_effort is not None:
+        if settings.model_wire_api == "chat_completions":
+            payload["reasoning_effort"] = settings.model_reasoning_effort
+        else:
+            payload["reasoning"] = {"effort": settings.model_reasoning_effort}
     if settings.model_contest_mode and settings.model_endpoint.rstrip("/") == ROUTER_ENDPOINT:
         payload["provider"] = {
             "order": [settings.model_provider_variant],

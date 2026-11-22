@@ -39,6 +39,8 @@ def tariff_snapshot(settings: Settings) -> dict[str, Any]:
     return {
         "catalog_id": settings.model_catalog_id or None,
         "provider_variant": settings.model_provider_variant or None,
+        "reasoning_effort": settings.model_reasoning_effort,
+        "max_output_tokens": settings.model_max_output_tokens,
         "snapshot": settings.model_price_snapshot or None,
         "contest_mode": settings.model_contest_mode,
         "input_usd_per_million": str(settings.model_input_usd_per_million) if declared else None,
