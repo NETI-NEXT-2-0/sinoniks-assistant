@@ -22,6 +22,7 @@ def test_schema_keeps_protected_side_at_project_level_and_no_model_provenance():
     definitions = schema['$defs']
     root = definitions['Requirements19']['properties']
     assert 'id' not in root and 'protected_network_id' in root
+    assert root['networks']['maxItems'] == 16
     assert 'protected_network_id' not in definitions['FileFlow19']['properties']
     assert definitions['FileFlow19']['properties']['sides']['minItems'] == 2
     assert definitions['FileFlow19']['properties']['sides']['maxItems'] == 2
@@ -124,6 +125,41 @@ async def test_only_new_projects_use_the_full_schema_and_existing_edits_stay_add
     assert result['design'].id == base['id']
     assert (observed[0] is not None) == new_project
     assert current_output_schema() is None
+
+
+async def test_three_network_extraction_asks_for_boundary_without_persisting_or_truncating(
+    monkeypatch,
+):
+    from test_sinoniks_contract19 import data_project
+
+    from partner_agent.runtime.rag_provider import answer_with_provider, prepare_request
+    from partner_agent.sinoniks_contract19 import Requirements19
+
+    proposal = data_project()
+    proposal['networks'].append({'id': 'warehouse', 'name': 'Склад', 'trust': None})
+    proposal['flows'].append({**proposal['flows'][0], 'id': 'warehouse-logs',
+                              'sender_network_id': 'warehouse', 'sender_ids': []})
+    with pytest.raises(ValidationError):
+        Requirements19.model_validate(proposal)  # Persistent contract remains two networks.
+
+    async def model(settings, messages):
+        assert current_output_schema()['$defs']['Requirements19']['properties'][
+            'networks']['maxItems'] == 16
+        return {'choices': [{'message': {'content': json.dumps({
+            'answer': 'Три сети', 'mode': 'design', 'citations': [],
+            'design': {k: v for k, v in proposal.items() if k != 'id'},
+        })}}]}
+
+    monkeypatch.setattr('partner_agent.runtime.rag_provider.chat_completion', model)
+    settings = Settings(_env_file=None, database_url='postgresql+psycopg://localhost/test',
+                        model_context_window_tokens=1050000, model_json_output=True,
+                        model_structured_design_output=True)
+    request = prepare_request('Свяжи офис, цех и склад', [], design_context=data_project(),
+                              new_project=True, context_window_tokens=1050000)
+    response = await answer_with_provider(settings, 'Свяжи офис, цех и склад', [],
+                                          prepared=request)
+    assert response['answer_mode'] == 'insufficient' and 'design' not in response
+    assert 'Какую пару выбрать' in response['answer']
 
 
 async def test_schema_size_is_checked_before_any_paid_request(monkeypatch):

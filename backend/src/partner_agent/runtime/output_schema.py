@@ -59,6 +59,15 @@ def requirements_schema() -> dict[str, Any]:
 def new_project_output_schema(handles: list[str]) -> dict[str, Any]:
     design = deepcopy(requirements_schema())
     definitions = design.pop("$defs", {})
+    # Extraction may describe an out-of-scope request. Keep all named networks
+    # until canonical validation asks the user to select one two-network boundary.
+    # A grammar capped at two forced the model to truncate networks but retain
+    # dangling flow references. This is not a larger persisted project contract.
+    design["properties"]["networks"].update(maxItems=16, description=(
+        "Preserve all explicitly named networks. For more than two, prefer mode=insufficient "
+        "and design=null, asking which pair to use. Never truncate networks while keeping "
+        "flows that reference them. The server cannot persist more than two networks."
+    ))
     # A new file exchange describes both device nodes, including an unknown
     # profile. Omitting a side drops explicitly supplied USB/method facts.
     file_sides = definitions["FileFlow19"]["properties"]["sides"]
