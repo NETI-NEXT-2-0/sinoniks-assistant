@@ -41,6 +41,25 @@ def normalize_note_entity_paths(document: dict[str, Any]) -> None:
                 note["path"] = "/".join(parts)
 
 
+def normalize_file_side_actor_ids(document: dict[str, Any]) -> None:
+    """Accept an unambiguous list-of-IDs spelling without inventing actors."""
+    flows = document.get("flows")
+    if not isinstance(flows, list):
+        return
+    for flow in flows:
+        if not isinstance(flow, dict) or flow.get("kind") != "file":
+            continue
+        sides = flow.get("sides")
+        if not isinstance(sides, list):
+            continue
+        for side in sides:
+            if not isinstance(side, dict) or "actor_ids" in side:
+                continue
+            aliases = side.get("actors")
+            if isinstance(aliases, list) and all(isinstance(item, str) for item in aliases):
+                side["actor_ids"] = side.pop("actors")
+
+
 def declared_log_transfer(question: str, project_id: str) -> Requirements19 | None:
     statement = re.split(r"[.!?]", question.strip(), maxsplit=1)[0]
     match = _LOG_TRANSFER.match(statement)

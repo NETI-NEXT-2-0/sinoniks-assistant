@@ -10,7 +10,11 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from partner_agent.requirements_input import bind_usb_source
+from partner_agent.requirements_input import (
+    bind_usb_source,
+    normalize_file_side_actor_ids,
+    normalize_note_entity_paths,
+)
 from partner_agent.requirements_service import without_sources
 from partner_agent.sinoniks_contract import Identifier, StrictModel
 from partner_agent.sinoniks_contract19 import Requirements19, pointer_value
@@ -143,4 +147,6 @@ def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
     # References, types, network membership, USB and all domain invariants are
     # checked together. No partial mutation escapes on any failed operation.
     bind_usb_source(result)
+    normalize_note_entity_paths(result)
+    normalize_file_side_actor_ids(result)
     return Requirements19.model_validate(result)

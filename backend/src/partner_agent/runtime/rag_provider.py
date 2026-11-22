@@ -15,6 +15,7 @@ from partner_agent.requirements_input import (
     bind_shared_file_checks,
     bind_usb_source,
     declared_log_transfer,
+    normalize_file_side_actor_ids,
     normalize_note_entity_paths,
 )
 from partner_agent.requirements_patch import (
@@ -333,6 +334,7 @@ def prepare_request(
             "Use the same optional checks_group identifier on file sides only when the user "
             "explicitly specifies a shared checking profile for those sides. Apply an answer "
             "to a shared-profile question to all sides with that identifier. "
+            "File sides use actor_ids (a list of existing actor IDs), never actors. "
             "The other arrays are "
             "actors:[{id,name}],unknowns:[{path,reason:'missing'|'user_unknown',"
             "target_id}],assumptions:[{path,target_id,explanation,basis:'product_fact'|"
@@ -699,6 +701,7 @@ async def answer_with_provider(
                     raise ProviderError("provider_invalid_design_provenance")
                 proposal = normalize_optional_text(proposal)
                 normalize_note_entity_paths(proposal)
+                normalize_file_side_actor_ids(proposal)
                 if request.new_project_id and patch is None:
                     bind_office_departments(proposal, question)
                     bind_shared_file_checks(proposal, question)
