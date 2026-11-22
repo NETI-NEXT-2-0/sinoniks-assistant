@@ -52,6 +52,30 @@ def test_unknown_cannot_hide_a_supplied_value_after_address_translation():
         Requirements19.model_validate(document)
 
 
+def test_indexed_missing_note_owner_is_derived_without_changing_unknown_value():
+    document = data_project()
+    document['networks'][0]['trust'] = None
+    document['unknowns'] = [{'path': '/networks/0/trust', 'target_id': None,
+                             'reason': 'user_unknown'}]
+    expected = deepcopy(document)
+    expected['unknowns'][0]['target_id'] = document['networks'][0]['id']
+    with pytest.raises(ValidationError):
+        Requirements19.model_validate(document)  # Canonical imports stay strict.
+    normalize_note_entity_paths(document)
+    assert document == expected
+    Requirements19.model_validate(document)
+
+
+@pytest.mark.parametrize('path', ['/networks/99/trust', '/networks/0/absent',
+                                 '/flows/0/protocol'])
+def test_derived_note_owner_does_not_accept_invalid_path_or_hide_value(path):
+    document = data_project()
+    document['unknowns'] = [{'path': path, 'target_id': None, 'reason': 'user_unknown'}]
+    normalize_note_entity_paths(document)
+    with pytest.raises(ValidationError):
+        Requirements19.model_validate(document)
+
+
 def test_file_side_alias_is_applied_atomically_in_addressed_patch():
     document = file_project()
     sides = deepcopy(document["flows"][0]["sides"])

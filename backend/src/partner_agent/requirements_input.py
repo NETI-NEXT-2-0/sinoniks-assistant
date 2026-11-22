@@ -18,8 +18,9 @@ _SHARED_CHECKS = re.compile(r"\bпроверки\s+одинаковые\s*(?=[,.
 def normalize_note_entity_paths(document: dict[str, Any]) -> None:
     """Translate an unambiguous entity ID in a note into its JSON Pointer index.
 
-    This changes addressing only. Values, target IDs and unknown semantics still
-    pass through the full Requirements19 validator; invalid notes remain invalid.
+    This changes addressing only. A missing owner can be derived from an indexed
+    path; conflicting explicit IDs and unknown semantics still pass through the
+    full Requirements19 validator. Invalid notes remain invalid.
     """
     for field in ("unknowns", "assumptions"):
         notes = document.get(field)
@@ -32,7 +33,16 @@ def normalize_note_entity_paths(document: dict[str, Any]) -> None:
             if len(parts) < 3 or parts[1] not in ("networks", "systems", "flows"):
                 continue
             entities = document.get(parts[1])
-            if not isinstance(entities, list) or parts[2].isdecimal():
+            if not isinstance(entities, list):
+                continue
+            if parts[2].isdecimal():
+                try:
+                    pointer_value(document, note["path"])
+                    owner = pointer_value(document, "/".join(parts[:3]))
+                except (ValueError, IndexError):
+                    continue
+                if isinstance(owner, dict) and note.get("target_id") is None:
+                    note["target_id"] = owner.get("id")
                 continue
             matches = [index for index, entity in enumerate(entities)
                        if isinstance(entity, dict) and entity.get("id") == parts[2]]
