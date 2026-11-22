@@ -82,6 +82,7 @@ async def test_preview_is_available_before_rules_and_archived_after_edit(plane):
     flow = conditions["flows"][0]
     receivers = flow["receiver_ids"]
     flow["receiver_ids"] = []
+    flow["mode"] = None
     command_headers = {**headers, "Idempotency-Key": str(uuid.uuid4())}
     first = await client.post(
         base, headers=command_headers, json={"branch_id": branch, "input": conditions},
@@ -93,6 +94,7 @@ async def test_preview_is_available_before_rules_and_archived_after_edit(plane):
     assert preview["scene"]["rule_rows"] == []
 
     flow["receiver_ids"] = receivers
+    flow["mode"] = "one-way"
     second = await client.post(
         base, headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
         json={"branch_id": branch, "parent_id": first_id, "input": conditions},

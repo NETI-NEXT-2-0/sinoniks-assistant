@@ -9,6 +9,7 @@ from partner_agent.sinoniks_data_rules import (
     DataPlacement,
     DataRule,
     existing_firewall_details,
+    known_protected_network,
 )
 from partner_agent.sinoniks_file_rules import FileLane, FileRule
 from partner_agent.sinoniks_layout import (
@@ -129,7 +130,8 @@ class LayoutContext:
 
     def data(self, rule: DataRule, number: int) -> DisplayRule:
         senders = self.endpoints(rule.from_network_id, rule.sender_ids, "Источник данных")
-        receivers = self.endpoints(rule.to_network_id, rule.receiver_ids, "Защищаемая сеть")
+        receiver_label = "Защищаемая сеть" if rule.application == "ntp" else "Получатель данных"
+        receivers = self.endpoints(rule.to_network_id, rule.receiver_ids, receiver_label)
         label: str = rule.protocol or "Протокол неизвестен"
         label += f" {rule.port}" if rule.port is not None else " · порт неизвестен"
         return DisplayRule(
@@ -138,7 +140,7 @@ class LayoutContext:
                 "Синхронизация времени" if rule.application == "ntp" else "Передача данных"
             ), rule.policy or "", rule.protocol, rule.port,
             sorted(rule.flow_ids), rule.from_network_id, rule.to_network_id,
-            provisional=rule.protocol is None,
+            provisional=rule.protocol is None or rule.provisional,
         )
 
     def file(self, rule: FileRule, number: int, network_names: dict[str, str]) -> DisplayRule:
@@ -451,7 +453,11 @@ def diagram_unavailability19(request: Requirements19, result: RuleCalculation) -
     if result.capacity_exceeded or rule_count > RULE_LIMIT:
         return "The selected rules exceed a single appliance diagram"
     if result.data.placement is None:
-        if not _topology_systems(request):
+        known_networks = {network.id for network in request.networks if network.name}
+        known_exchange = any({flow.sender_network_id, flow.receiver_network_id} <= known_networks
+                             for flow in request.flows
+                             if flow.sender_network_id and flow.receiver_network_id)
+        if not _topology_systems(request) and not known_exchange:
             return "The preview requires a named system in a known network"
         return None
     if not rule_count and (
@@ -466,8 +472,10 @@ def _unplaced_topology(request: Requirements19) -> list[Page]:
     members = _topology_systems(request)
     groups = [[system for system in members if system.network_id == network.id]
               for network in request.networks]
+    protected_network = known_protected_network(request)
+    usb_systems = {system.id: system for system in request.systems if system.kind == "usb"}
     pages: list[Page] = []
-    for start in range(0, max(map(len, groups)), ENDPOINTS_PER_SIDE):
+    for start in range(0, max(1, max(map(len, groups), default=0)), ENDPOINTS_PER_SIDE):
         number = len(pages) + 1
         page = Page(f"preview-{number}", f"Предварительная топология · {number}")
         _text(page, "title", "Предварительная топология", 26, 12, 1380, size=22)
@@ -479,7 +487,7 @@ def _unplaced_topology(request: Requirements19) -> list[Page]:
                 network.trust or "", "Доверие неизвестно",
             )
             protected = (
-                " · защищаемая по условиям" if network.id == request.protected_network_id else ""
+                " · защищаемая по условиям" if network.id == protected_network else ""
             )
             caption = text_lines(f"{names[network.id]} · {trust}{protected}", 64)
             top = 130 + 20 * len(caption.splitlines()) + 16
@@ -514,13 +522,24 @@ def _unplaced_topology(request: Requirements19) -> list[Page]:
             else:
                 service = "файлы"
                 direction = {"forward": "→", "both": "↔"}.get(flow.direction or "", "·")
+                attached_usb = [usb_systems[key] for key in flow.sender_ids
+                                if key in usb_systems]
+                if attached_usb:
+                    source = ", ".join(item.name or "USB-носитель" for item in attached_usb)
+                    label = text_lines(
+                        f"{source} · прямое подключение к Узлу А; размещение требует проверки", 90,
+                    )
+                    height = 20 * len(label.splitlines()) + 20
+                    page.boxes.append(Box(f"usb-{flow.id}", label, 40, top, 740, height))
+                    top += height + 8
             top += _text(page, f"flow-{flow.id}", f"{source} {direction} {target} · {service}",
                          26, top, 1380)
             if not isinstance(flow, DataFlow19):
                 for side in flow.sides:
                     summary = _check_summary(side.checks)
                     if summary:
-                        network_name = names[side.network_id]
+                        network_name = (source if side.usb and side.network_id ==
+                                        flow.sender_network_id else names[side.network_id])
                         top += _text(page, f"checks-{flow.id}-{side.network_id}",
                                      f"{network_name}: {summary}", 40, top, 1360)
                     if side.received_files_shared is False and (

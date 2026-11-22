@@ -217,6 +217,8 @@ def readiness_report(
             "assumptions": assumptions,
             "checks": [{"code": "exports", "title": "Согласованность расчёта и выгрузок",
                         "status": "failed" if integrity else "passed"},
+                       {"code": "placement", "title": "Размещение оборудования проверено",
+                        "status": "passed" if result.get("synonyx") else "pending"},
                        {"code": "minimum", "title": "Минимум правил подтверждён",
                         "status": "passed" if result.get("confirmed_rules_count") is not None
                         else "pending"}]}

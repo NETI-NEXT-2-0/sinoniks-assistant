@@ -241,7 +241,9 @@ def _lanes(
         elif any(check.kind == "unsupported" for check in side.checks):
             issues.append(FileIssue(flow.id, "unsupported_file_check", side.network_id))
         if side.usb is True and side.network_id != outside_network_id:
-            issues.append(FileIssue(flow.id, "usb_requires_node_a", side.network_id))
+            reason = "usb_placement_unverified" if outside_network_id is None \
+                else "usb_requires_node_a"
+            issues.append(FileIssue(flow.id, reason, side.network_id))
         if any(setting.protocol is None or setting.storage_id is None
                for setting in side.automations):
             issues.append(FileIssue(flow.id, "file_automation_details_unknown", side.network_id))

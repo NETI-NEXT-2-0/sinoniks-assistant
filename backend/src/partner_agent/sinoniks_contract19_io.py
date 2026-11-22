@@ -111,6 +111,8 @@ def assess(request: Requirements19) -> Assessment19:
     issues: list[ContractIssue19] = []
     unknown = {note.path for note in request.unknowns if note.reason == "user_unknown"}
     documented_gaps = {note.path for note in request.unknowns}
+    shared = {path: fields[0][0] for fields in request.pending_check_groups()
+              for path, _, _ in fields}
 
     def issue(path: str, message: str, kind: Literal[
         "missing", "conflict", "unsupported", "optional",
@@ -189,9 +191,13 @@ def assess(request: Requirements19) -> Assessment19:
                           "автоматически из хранилища или с USB, если применимо?")
                 checks_path = path + "/checks"
                 if side.checks is None and (
-                    checks_path in documented_gaps or not flow.has_declared_checks()
+                    checks_path in shared or checks_path in documented_gaps
+                    or not flow.has_declared_checks()
                 ):
-                    issue(checks_path, "Уточните проверки файлов на этой стороне.")
+                    common = shared.get(checks_path)
+                    if common is None or common == checks_path:
+                        issue(checks_path, "Уточните общий профиль проверок файлов." if common
+                              else "Уточните проверки файлов на этой стороне.")
                 receives_files = (
                     flow.direction != "forward" or side.network_id != flow.sender_network_id
                 )

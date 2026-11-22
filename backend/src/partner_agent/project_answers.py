@@ -117,8 +117,29 @@ def clarification_message(request: Requirements19, command: ProjectAnswerCommand
     return text
 
 
+def _expanded_check_answers(
+    request: Requirements19, command: ProjectAnswerCommand19,
+) -> list[ProjectFieldAnswer19]:
+    groups = {field: fields for fields in request.pending_check_groups() for field in fields}
+    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    result: list[ProjectFieldAnswer19] = []
+    for answer in answers:
+        group = (groups.get((answer.path, answer.target_id, answer.side_network_id))
+                 if answer.target_id is not None and answer.side_network_id is not None else None)
+        if group is None:
+            result.append(answer)
+        else:
+            result.extend(answer.model_copy(update={
+                "path": path, "target_id": target_id, "side_network_id": network_id,
+            }) for path, target_id, network_id in group)
+    if len({answer.path for answer in result}) != len(result):
+        raise APIError(422, "invalid_project_answer", "Answer each shared profile only once")
+    return result
+
+
 def reapply_structured_answers(
     request: Requirements19, command: ProjectAnswerCommand19,
+    *, selection_context: Requirements19 | None = None,
 ) -> Requirements19:
     """Explicit selections win over model interpretation, bound by stable IDs.
 
@@ -126,7 +147,7 @@ def reapply_structured_answers(
     answer to another object, and a deleted target rejects the whole proposal.
     """
     document = request.model_dump(mode="json")
-    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    answers = _expanded_check_answers(selection_context or request, command)
     for answer in answers:
         parts = answer.path.split("/")
         if answer.target_id is not None:
@@ -159,7 +180,7 @@ def parse_project_answer(value: dict[str, Any] | None) -> ProjectAnswerCommand19
 
 def apply_answer(request: Requirements19, command: ProjectAnswerCommand19) -> Requirements19:
     document = request.model_dump(mode="json")
-    answers = command.answers if isinstance(command, ProjectAnswerBatch19) else [command]
+    answers = _expanded_check_answers(request, command)
     if isinstance(command, ProjectAnswerBatch19) and command.remarks:
         targets = {
             (item["field"], item["target_id"], item["side_network_id"])

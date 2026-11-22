@@ -18,6 +18,7 @@ FILE_ISSUE_LABELS = {
     "automation_conflicts_with_file_direction": "Автоматизация противоречит направлению обмена",
     "usb_conflicts_with_file_method": "Подключение USB противоречит указанному методу",
     "usb_requires_node_a": "USB должен подключаться на стороне Узла А",
+    "usb_placement_unverified": "Привязка стороны USB к Узлу А ещё не проверена",
     "unsupported_file_check": "Запрошенная проверка не поддерживается продуктом",
 }
 

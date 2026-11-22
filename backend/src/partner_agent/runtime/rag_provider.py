@@ -10,6 +10,12 @@ from pydantic import ValidationError
 
 from partner_agent.documents.edited_copy import MAX_SECTION_TITLE
 from partner_agent.infra.settings import Settings
+from partner_agent.requirements_input import (
+    bind_office_departments,
+    bind_shared_file_checks,
+    bind_usb_source,
+    declared_log_transfer,
+)
 from partner_agent.requirements_patch import (
     PatchError,
     apply_patch,
@@ -148,6 +154,7 @@ class PreparedRequest:
     input_version: int = 2
     citation_aliases: dict[str, str] = field(default_factory=dict)
     patch_base: dict[str, Any] | None = None
+    new_project_id: str | None = None
 
 
 class ProviderOptions(TypedDict, total=False):
@@ -241,8 +248,11 @@ def prepare_request(
         "networks and requested exchanges, asks for changes, or supplies missing project "
         "conditions, return mode=design with the COMPLETE updated conditions. If asked to "
         "explain the current project without a calculation snapshot, use insufficient. "
-        "For other requests set design=null. Product "
-        "capability questions alone are source-based answers, not design requests. "
+        "For other requests set design=null. "
+        "When asked about a conditional minimum of an existing project, explain its confirmed "
+        "lower bound and distinguish it from a final calculation. Preserve the saved fields "
+        "and do not assume methods, checks or access solely to achieve the requested count. "
+        "Product capability questions alone are source-based answers, not design requests. "
         "A saved project does not change the subject of a general question about Sinoniks. "
         "Explain how the PRODUCT works from Evidence, using grounded with citations; do not "
         "replace that answer with the user's UDP/TCP example or claim that only the saved "
@@ -312,6 +322,10 @@ def prepare_request(
             "use access_group=shared_documents, laboratory_group or service_group, never a "
             "display label with spaces. Reuse the same group identifier for the same access "
             "scope and distinct identifiers for isolated groups; preserve existing group IDs. "
+            "Departments mentioned inside one office network are access groups, not networks. "
+            "Keep separate file flows for isolated receivers in the same destination network. "
+            "Do not infer manual reception from manual sending or count groups as individuals. "
+            "Do not add a storage or system just because an access group is named. "
             "Networks: {id,name:null|string,trust:null|'open'|'closed'}. Systems: "
             "{id,name,network_id,kind:'system'|'storage'|'usb',attachment:null|'node-A'}. "
             "USB has network_id=null and attachment=node-A; no data stream may use USB. "
@@ -328,6 +342,8 @@ def prepare_request(
             "receiver_ids,purpose,policy,requirement_ids. Data also has mode:null|'one-way'|"
             "'two-way',protocol:null|'TCP'|'UDP'|'MQTT'|'Modbus TCP'|'МЭК 104',"
             "destination_port:null|integer,application:'generic'|'ntp'. "
+            "When the two networks, protocol and direction are stated, extract the data flow "
+            "even if the individual endpoints are unnamed. Leave their ID lists empty. "
             "MQTT uses two-way transport even when only the sender publishes telemetry. "
             "Do not invent a port or assume that reverse payloads are allowed. "
             "File also has "
@@ -338,6 +354,9 @@ def prepare_request(
             "string,icap_service:null|'antivirus'|'sandbox'|'dlp'}],received_files_shared:"
             "null|boolean,access_group:null|string}]. Preserve requested PULL on both sides; "
             "do not pretend it is one rule. checks=null means unknown, [] means explicitly none. "
+            "Use the same optional checks_group identifier on file sides only when the user "
+            "explicitly specifies a shared checking profile for those sides. Apply an answer "
+            "to a shared-profile question to all sides with that identifier. "
             "The other arrays are "
             "actors:[{id,name}],unknowns:[{path,reason:'missing'|'user_unknown',"
             "target_id}],assumptions:[{path,target_id,explanation,basis:'product_fact'|"
@@ -578,6 +597,7 @@ def prepare_request(
         {f"source_{index}": item["evidence_id"]
          for index, item in enumerate(selected_evidence, 1)},
         deepcopy(design_context) if input_version == 3 and not new_project else None,
+        design_context.get("id") if input_version == 3 and new_project and design_context else None,
     )
 
 
@@ -690,6 +710,11 @@ async def answer_with_provider(
         if mode == "project_explanation" and not request.can_explain_project:
             raise ProviderError("provider_request_mode_violation")
         conditions: DesignInput | Requirements19 | None = None
+        if mode == "insufficient" and proposal is None and request.new_project_id:
+            conditions = declared_log_transfer(question, request.new_project_id)
+            if conditions is not None:
+                mode = "design"
+                proposal = without_sources(conditions.model_dump(mode="json"))
         if mode == "design":
             if not isinstance(proposal, dict):
                 raise ProviderError("provider_invalid_design")
@@ -697,6 +722,10 @@ async def answer_with_provider(
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
                 proposal = normalize_optional_text(proposal)
+                if request.new_project_id and patch is None:
+                    bind_office_departments(proposal, question)
+                    bind_shared_file_checks(proposal, question)
+                    bind_usb_source(proposal)
                 try:
                     conditions = Requirements19.model_validate(proposal)
                 except ValidationError as invalid:

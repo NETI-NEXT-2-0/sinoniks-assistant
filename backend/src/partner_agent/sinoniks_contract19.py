@@ -131,6 +131,7 @@ class FileSide19(StrictModel):
     automations: list[Automatic19] = Field(default_factory=list, max_length=8)
     # null = not supplied; [] = explicitly no checks.
     checks: list[FileCheck19] | None = Field(default=None, max_length=20)
+    checks_group: Identifier | None = Field(default=None, exclude_if=lambda value: value is None)
     received_files_shared: bool | None = Field(default=None, strict=True)
     access_group: Identifier | None = None
 
@@ -227,6 +228,23 @@ class Requirements19(StrictModel):
     legacy: LegacyContext19 | None = None
     protected_network_id: Identifier | None = None
     existing_firewall_name: Name19 | None = None
+
+    def pending_check_groups(self) -> list[list[tuple[str, str, str]]]:
+        groups: dict[str, list[tuple[str, str, str]]] = {}
+        resolved = set()
+        unknown = {note.path for note in self.unknowns if note.reason == "user_unknown"}
+        for index, flow in enumerate(self.flows):
+            if isinstance(flow, FileFlow19):
+                for side_index, side in enumerate(flow.sides):
+                    if side.checks_group is not None:
+                        path = f"/flows/{index}/sides/{side_index}/checks"
+                        groups.setdefault(side.checks_group, []).append(
+                            (path, flow.id, side.network_id),
+                        )
+                        if side.checks is not None:
+                            resolved.add(side.checks_group)
+        return [fields for key, fields in groups.items() if key not in resolved and len(fields) > 1
+                and len({path in unknown for path, _, _ in fields}) == 1]
 
     @model_serializer(mode="wrap")
     def compatible_dump(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
