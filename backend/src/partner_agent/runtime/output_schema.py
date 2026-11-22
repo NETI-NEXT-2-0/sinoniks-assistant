@@ -109,7 +109,12 @@ def new_project_output_schema(handles: list[str]) -> dict[str, Any]:
                           "items": {"type": "object", "additionalProperties": False,
                                     "properties": {"evidence_id": citation_id},
                                     "required": ["evidence_id"]}},
-            "design": {"anyOf": [{"$ref": "#/$defs/Requirements19"}, {"type": "null"}]},
+            "design": {"anyOf": [{"$ref": "#/$defs/Requirements19"}, {"type": "null"}],
+                       "description": (
+                           "Null for educational product how-to, comparisons and vendor wishes. "
+                           "Use an object only for an actual request to design infrastructure "
+                           "or capture the user's network exchange conditions."
+                       )},
             "vendor_wishes": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {"kind": {"type": "string", "enum": ["unsupported", "free_text"]},
