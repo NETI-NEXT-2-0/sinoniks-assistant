@@ -15,6 +15,7 @@ from partner_agent.requirements_input import (
     bind_shared_file_checks,
     bind_usb_source,
     declared_log_transfer,
+    discard_stale_missing_notes,
     normalize_file_side_actor_ids,
     normalize_note_entity_paths,
 )
@@ -709,6 +710,7 @@ async def answer_with_provider(
                 proposal = normalize_optional_text(proposal)
                 normalize_note_entity_paths(proposal)
                 normalize_file_side_actor_ids(proposal)
+                discard_stale_missing_notes(proposal)
                 if request.new_project_id and patch is None:
                     bind_office_departments(proposal, question)
                     bind_shared_file_checks(proposal, question)

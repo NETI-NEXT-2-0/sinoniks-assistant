@@ -12,6 +12,7 @@ from pydantic import Field
 
 from partner_agent.requirements_input import (
     bind_usb_source,
+    discard_stale_missing_notes,
     normalize_file_side_actor_ids,
     normalize_note_entity_paths,
 )
@@ -149,4 +150,5 @@ def apply_patch(base: dict[str, Any], proposal: Any) -> Requirements19:
     bind_usb_source(result)
     normalize_note_entity_paths(result)
     normalize_file_side_actor_ids(result)
+    discard_stale_missing_notes(result)
     return Requirements19.model_validate(result)

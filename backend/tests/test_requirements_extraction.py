@@ -84,7 +84,8 @@ def test_seven_structural_errors_do_not_mask_the_following_unknown_conflict():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("defect", [None, "group", "nested_wishes", "unknown", "reference"])
+@pytest.mark.parametrize("defect", [None, "group", "nested_wishes", "unknown", "reference",
+                                   "stale_missing"])
 async def test_provider_accepts_separated_envelope_without_repairing_invalid_design(
     monkeypatch, defect,
 ):
@@ -94,6 +95,9 @@ async def test_provider_accepts_separated_envelope_without_repairing_invalid_des
     elif defect == "nested_wishes":
         proposal["vendor_wishes"] = []
     elif defect == "unknown":
+        proposal["unknowns"] = [{"path": "/systems", "target_id": None,
+                                 "reason": "user_unknown"}]
+    elif defect == "stale_missing":
         proposal["unknowns"] = [{"path": "/systems", "target_id": None, "reason": "missing"}]
     elif defect == "reference":
         proposal["flows"][0]["receiver_ids"] = ["nonexistent"]
@@ -112,7 +116,7 @@ async def test_provider_accepts_separated_envelope_without_repairing_invalid_des
     settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
     options = {"design_context": {"schema_version": 3, "id": "draft"},
                "request_mode": "design"}
-    if defect:
+    if defect and defect != "stale_missing":
         with pytest.raises(ProviderError, match="provider_invalid_design") as invalid:
             await answer_with_provider(settings, "Проект", [], **options)
         assert invalid.value.usage["total_tokens"] == 30
@@ -120,7 +124,10 @@ async def test_provider_accepts_separated_envelope_without_repairing_invalid_des
     else:
         result = await answer_with_provider(settings, "Проект", [], **options)
         assert result["vendor_wishes"] == wishes
-        assert result["design"] == Requirements19.model_validate(proposal)
+        expected = copy.deepcopy(proposal)
+        if defect == "stale_missing":
+            expected["unknowns"] = []
+        assert result["design"] == Requirements19.model_validate(expected)
         assert result["design"].requests_for_vendor == []
     assert len(calls) == 1
     assert proposal == original

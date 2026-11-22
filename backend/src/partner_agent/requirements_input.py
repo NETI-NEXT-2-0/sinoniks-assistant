@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from partner_agent.sinoniks_contract19 import Requirements19
+from partner_agent.sinoniks_contract19 import Requirements19, Unknown19, pointer_value
 
 _OFFICE_DEPARTMENTS = re.compile(
     r"\b(?:отдел\w*|подразделени\w*)\s+в\s+(?:одной\s+)?офисной\s+сети\b", re.I,
@@ -39,6 +39,34 @@ def normalize_note_entity_paths(document: dict[str, Any]) -> None:
             if len(matches) == 1 and note.get("target_id") == parts[2]:
                 parts[2] = str(matches[0])
                 note["path"] = "/".join(parts)
+
+
+def discard_stale_missing_notes(document: dict[str, Any]) -> None:
+    """Remove redundant model bookkeeping only when its supplied value is known.
+
+    This never supplies a value, changes an explicit user_unknown, fixes a bad
+    pointer/owner, or relaxes the canonical import/editor validator.
+    """
+    notes = document.get("unknowns")
+    if not isinstance(notes, list):
+        return
+    remaining = []
+    for item in notes:
+        try:
+            note = Unknown19.model_validate(item)
+            parts = note.path.split("/")
+            if len(parts) >= 3 and parts[1] in {"networks", "systems", "flows"}:
+                owner = pointer_value(document, "/".join(parts[:3]))
+                if not isinstance(owner, dict) or owner.get("id") != note.target_id:
+                    raise ValueError("Unknown owner")
+            elif note.target_id is not None:
+                raise ValueError("Root owner")
+            if note.reason == "missing" and pointer_value(document, note.path) not in (None, []):
+                continue
+        except ValueError:
+            pass  # Leave malformed notes for the full validator to reject.
+        remaining.append(item)
+    document["unknowns"] = remaining
 
 
 def normalize_file_side_actor_ids(document: dict[str, Any]) -> None:

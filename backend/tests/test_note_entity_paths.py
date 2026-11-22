@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from test_sinoniks_contract19 import data_project, file_project
 
 from partner_agent.requirements_input import (
+    discard_stale_missing_notes,
     normalize_file_side_actor_ids,
     normalize_note_entity_paths,
 )
@@ -76,5 +77,38 @@ def test_actor_alias_conflict_is_not_resolved_silently():
     document = file_project()
     document["flows"][0]["sides"][0].update(actors=[], actor_ids=[])
     normalize_file_side_actor_ids(document)
+    with pytest.raises(ValidationError):
+        Requirements19.model_validate(document)
+
+
+def test_redundant_missing_flag_does_not_discard_known_file_checks():
+    document = file_project()
+    document['flows'][0]['sides'][0]['checks'] = [{'kind': 'icap', 'icap_service': 'antivirus'}]
+    note = {'path': '/flows/0/sides/0/checks', 'target_id': 'files', 'reason': 'missing'}
+    document['unknowns'] = [note]
+    expected = deepcopy(document)
+    expected['unknowns'] = []
+    discard_stale_missing_notes(document)
+    assert document == expected
+    Requirements19.model_validate(document)
+    base = file_project()
+    patched = apply_patch(base, {'operations': [
+        {'op': 'update', 'collection': 'flows', 'id': 'files',
+         'values': {'sides': document['flows'][0]['sides']}},
+        {'op': 'update', 'collection': 'project', 'values': {'unknowns': [note]}},
+    ]})
+    assert not patched.unknowns and patched.flows[0].sides[0].checks
+
+
+@pytest.mark.parametrize('change', [
+    {'reason': 'user_unknown'}, {'target_id': 'wrong'},
+    {'path': '/flows/0/absent'}, {'extra': True},
+])
+def test_stale_note_cleanup_preserves_conflicts_and_invalid_notes_for_rejection(change):
+    document = data_project()
+    note = {'path': '/flows/0/protocol', 'target_id': 'logs', 'reason': 'missing', **change}
+    document['unknowns'] = [note]
+    discard_stale_missing_notes(document)
+    assert document['unknowns'] == [note]
     with pytest.raises(ValidationError):
         Requirements19.model_validate(document)
