@@ -59,8 +59,12 @@ async def test_schema_context_is_private_per_task_and_restored_on_exception():
     assert output_schema_sha256() is None
 
 
-@pytest.mark.parametrize('wire', ['chat_completions', 'responses'])
-async def test_schema_wire_format_and_ledger_hash(wire):
+@pytest.mark.parametrize('wire,endpoint', [
+    ('chat_completions', 'https://test.invalid/v1'),
+    ('responses', 'https://test.invalid/v1'),
+    ('chat_completions', 'https://polza.ai/api/v1'),
+])
+async def test_schema_wire_format_and_ledger_hash(wire, endpoint):
     schema = new_project_output_schema(['source_1'])
     calls = []
     def receive(request):
@@ -70,11 +74,14 @@ async def test_schema_wire_format_and_ledger_hash(wire):
                   else body['text']['format'])
         assert output['strict'] is True and output['schema'] == schema
         assert output['name'] == 'sinoniks_new_project'
+        if endpoint == 'https://polza.ai/api/v1':
+            assert body['provider'] == {'only': ['openai'], 'allow_fallbacks': False}
         return httpx.Response(200, json={'choices': []})
     settings = Settings(_env_file=None, database_url='postgresql+psycopg://localhost/test',
-                        runtime_profile='openai_compatible', model_endpoint='https://test.invalid/v1',
+                        runtime_profile='openai_compatible', model_endpoint=endpoint,
                         model_name='synthetic', model_api_key='synthetic', model_wire_api=wire,
-                        model_json_output=True, model_structured_design_output=True)
+                        model_json_output=True, model_structured_design_output=True,
+                        model_provider_variant='openai')
     with output_schema_scope(schema):
         await chat_completion(settings, [], client_factory=lambda **kw: httpx.AsyncClient(
             transport=httpx.MockTransport(receive), **kw))
