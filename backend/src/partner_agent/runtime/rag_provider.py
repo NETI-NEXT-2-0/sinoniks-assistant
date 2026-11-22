@@ -698,6 +698,11 @@ async def answer_with_provider(
             raise ProviderError("provider_missing_grounded_citation")
         proposal = decoded.get("design")
         patch = decoded.get("design_patch")
+        # Accept only an exact alternate envelope; never merge competing edits
+        # or treat arbitrary project fields as patch operations.
+        if (patch is None and isinstance(proposal, dict)
+                and set(proposal) == {"design_patch"}):
+            patch, proposal = proposal["design_patch"], None
         if patch is not None:
             if (mode != "design" or proposal is not None or request_mode == "reference"
                     or request.patch_base is None):

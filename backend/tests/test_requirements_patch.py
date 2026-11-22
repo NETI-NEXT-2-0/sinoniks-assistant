@@ -203,11 +203,14 @@ async def test_too_small_declared_window_stops_before_provider_call(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_provider_patch_applies_only_to_captured_base(monkeypatch):
+@pytest.mark.parametrize('nested', [False, True])
+async def test_provider_patch_applies_only_to_captured_base(monkeypatch, nested):
     async def model(settings, messages):
+        patch = {"operations": [edit(name="Новое имя")]}
         return {"choices": [{"message": {"content": json.dumps({
-            "answer": "Переименовал", "mode": "design", "design": None, "citations": [],
-            "design_patch": {"operations": [edit(name="Новое имя")]},
+            "answer": "Переименовал", "mode": "design", "citations": [],
+            **({'design': {'design_patch': patch}} if nested
+               else {'design': None, 'design_patch': patch}),
         })}}]}
     monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
     settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
@@ -220,6 +223,20 @@ async def test_provider_patch_applies_only_to_captured_base(monkeypatch):
     with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
         await answer_with_provider(settings, "Переименуй", [], design_context=base,
                                    request_mode="reference")
+
+
+@pytest.mark.asyncio
+async def test_competing_patch_envelopes_are_rejected(monkeypatch):
+    async def model(settings, messages):
+        patch = {'operations': [edit(name='Новое имя')]}
+        return {'choices': [{'message': {'content': json.dumps({
+            'answer': 'Правка', 'mode': 'design', 'citations': [],
+            'design': {'design_patch': patch}, 'design_patch': patch,
+        })}}]}
+    monkeypatch.setattr('partner_agent.runtime.rag_provider.chat_completion', model)
+    settings = Settings(database_url='postgresql+psycopg://u:p@localhost/db')
+    with pytest.raises(ProviderError, match='provider_invalid_design_patch'):
+        await answer_with_provider(settings, 'Переименуй', [], design_context=data_project())
 
 
 @pytest.mark.asyncio
