@@ -1,6 +1,7 @@
 """Owned Hatchet execution for real provider requests and isolated fixtures."""
 
 import asyncio
+import json
 from contextlib import suppress
 from typing import Any
 from uuid import UUID
@@ -238,15 +239,48 @@ async def execute_run(
                         "Изменения по этому запросу не сохранены. "
                         f"Запрос выполнен для версии №{project.revision}.\n\n{answer}"
                     )
+                success_outcome: dict[str, Any] = {
+                    **form_metadata,
+                    "profile": settings.runtime_profile, "citations": result["citations"],
+                    "usage": result["usage"], "estimated_cost_usd": actual_cost,
+                    "usage_complete": actual_cost is not None, "answer_mode": answer_mode,
+                }
+                if settings.developer_diagnostics_enabled and settings.environment != "production":
+                    project_counts = {
+                        field: len(project_context.get(field) or [])
+                        for field in ("networks", "systems", "flows", "actors")
+                    } if isinstance(project_context, dict) else None
+                    success_outcome["developer_diagnostics"] = {
+                        "stage": "completed",
+                        "run_id": str(run_id),
+                        "request_mode": current_run.request_mode,
+                        "answer_mode": answer_mode,
+                        "design_returned": result.get("design") is not None,
+                        "design_context_supplied": project_context is not None,
+                        "design_context_schema_version": (
+                            project_context.get("schema_version")
+                            if isinstance(project_context, dict) else None
+                        ),
+                        "design_context_counts": project_counts,
+                        "design_context_chars": (
+                            len(json.dumps(
+                                project_context, ensure_ascii=False, separators=(",", ":"),
+                            ))
+                            if project_context is not None else 0
+                        ),
+                        "prepared_message_chars": len(json.dumps(
+                            prepared.messages, ensure_ascii=False
+                        )),
+                        "prepared_message_count": len(prepared.messages),
+                        "model_response": result.get("developer_model_response"),
+                    }
+                if result.get("no_changes"):
+                    success_outcome.update(
+                        project_changed=False, task_completed=False
+                    )
                 status = await complete(
                     claim.ownership, "succeeded",
-                    {**form_metadata, "profile": settings.runtime_profile,
-                     "citations": result["citations"],
-                     "usage": result["usage"], "estimated_cost_usd": actual_cost,
-                     "usage_complete": actual_cost is not None,
-                     **({"project_changed": False, "task_completed": False}
-                        if result.get("no_changes") else {}),
-                     "answer_mode": answer_mode}, answer,
+                    success_outcome, answer,
                     evidence=[*evidence, *history_sources],
                     design_input=result.get("design"), design_parent_id=project_parent,
                     vendor_wishes=result.get("vendor_wishes"),

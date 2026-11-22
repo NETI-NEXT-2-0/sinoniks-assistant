@@ -72,15 +72,52 @@ function runFailure(run: Run): string {
   return 'Выполнение завершилось технической ошибкой. Ответ не подтверждён.';
 }
 
-function DeveloperDiagnostics({ run }: { run: Run }) {
+function DeveloperDiagnostics({ run, chatId, prompt }: { run: Run; chatId: string | null; prompt: Message | undefined }) {
   const outcome = isRecord(run.outcome) ? run.outcome : null;
   const diagnostic = isRecord(outcome?.developer_diagnostics) ? outcome.developer_diagnostics : null;
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   if (!diagnostic) return null;
-  // Server supplies only allowlisted schema locations/types, never provider payloads.
-  const report = JSON.stringify({ error_code: outcome?.code, ...diagnostic }, null, 2);
-  return <details className="run-developer-diagnostics"><summary>Диагностика разработчика</summary>
-    <pre>{report}</pre><button type="button" onClick={() => { void navigator.clipboard.writeText(report); }}>Скопировать диагностику</button>
-  </details>;
+
+  // One self-contained export; the full developer-mode outcome may contain project details.
+  const report = JSON.stringify({
+    format: 'sinoniks-developer-report',
+    version: 1,
+    app: 'sinoniks-assistant',
+    chat_id: chatId,
+    run_id: run.id,
+    branch_id: run.branch_id,
+    input_message_id: run.input_message_id,
+    user_message: prompt ? { id: prompt.id, text: prompt.content, created_at: prompt.created_at } : null,
+    request_mode: run.request_mode,
+    run_status: run.status,
+    runtime_profile: run.runtime_profile ?? null,
+    error_code: outcome?.code ?? null,
+    error_summary: run.status === 'failed' ? runFailure(run) : null,
+    project_saved: typeof outcome?.design_id === 'string',
+    project_id: outcome?.design_id ?? null,
+    project_revision: outcome?.design_revision ?? null,
+    diagnostics: diagnostic,
+    outcome,
+  }, null, 2);
+
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+    }
+  };
+  return <div className="run-developer-tools">
+    <button type="button" className="developer-copy-report" onClick={() => { void copyReport(); }}>
+      {copyState === 'copied' ? 'Отчёт скопирован' : 'Скопировать полный debug-отчёт'}
+    </button>
+    {copyState === 'error' && <span role="alert">Не удалось скопировать. Откройте отчёт и скопируйте текст вручную.</span>}
+    <details className="run-developer-diagnostics">
+      <summary>Полный отчёт разработчика</summary>
+      <pre>{report}</pre>
+    </details>
+  </div>;
 }
 
 function completedHelpful(run: Run | undefined): boolean {
@@ -255,7 +292,8 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
     return <div className="run-detail" key={run.id}>
       <RunState run={run} />
       {!terminal(run.status) && <button className="run-stop" aria-label={`Остановить выполнение ${run.queue_seq}`} onClick={() => { void space.cancel(run.id); }}><Icon name="stop" />Стоп</button>}
-      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p>{selectedMessages.some(message => message.id === run.input_message_id) && <button type="button" disabled={!!space.command} onClick={() => { const message = selectedMessages.find(item => item.id === run.input_message_id); if (message) { space.setDraft(message.content); input.current?.focus(); } }}>Вставить текст запроса</button>}<DeveloperDiagnostics run={run} /></>}
+      {run.status === 'failed' && <><p className="run-explanation">{runFailure(run)}</p>{selectedMessages.some(message => message.id === run.input_message_id) && <button type="button" disabled={!!space.command} onClick={() => { const message = selectedMessages.find(item => item.id === run.input_message_id); if (message) { space.setDraft(message.content); input.current?.focus(); } }}>Вставить текст запроса</button>}</>}
+      {terminal(run.status) && <DeveloperDiagnostics run={run} chatId={value?.chat.id ?? null} prompt={value?.messages.find(message => message.id === run.input_message_id)} />}
       {run.status === 'cancelled' && <p className="run-explanation">Выполнение остановлено. Полученный фрагмент сохранён.</p>}
       {run.status === 'waiting_input' && <div className="clarification">
         <p>{run.clarification_question ?? 'Уточните запрос, чтобы продолжить.'}</p>
@@ -274,7 +312,7 @@ export function Workspace({ user, auth, appearance, logout, logoutPending, onExp
       || ((outcome?.design_status === 'conceptual' || outcome?.design_has_diagram === true || outcome?.design_has_questions === true) && typeof outcome.design_id === 'string'
         && !readyDesigns.has(outcome.design_id))
     );
-    return <article className="assistant-message" key={message.id} data-message-id={message.id}><div className="agent-mark"><Icon name="message" /></div><div className="message-content"><div className="author">{product.name}<span>{runLabel(run)}</span></div><div className="prose stream-prose">{shownAnswer(message.run_id ?? message.id, message.content)}</div><AnswerSources citations={citations} auth={auth} runId={message.run_id} onExpired={onExpired} />{value && typeof outcome?.design_id === 'string' && typeof outcome.design_revision === 'number' && <DesignResultCard ownerId={user.id} readiness={readReadiness(outcome?.design_readiness)} auth={auth} chatId={value.chat.id} id={outcome.design_id} revision={outcome.design_revision} ready={outcome.design_status === 'conceptual' || outcome.design_has_diagram === true} requirements={outcome.design_schema_version === 3} calculated={outcome.design_has_result === true} questions={outcome.design_has_questions === true} branchId={value.selected_branch_id} newer={latestProjectId !== null && latestProjectId !== outcome.design_id} questionsRefresh={questionsRefresh} disabled={!!space.command || space.sending || selectedRuns.some(item => !terminal(item.status))} onAnswer={(message, answer, wish) => space.execute({ kind: 'send', key: crypto.randomUUID(), chatId: value.chat.id, branchId: value.selected_branch_id, body: { branch_id: value.selected_branch_id, message, attachment_ids: [], web_mode: 'off', request_mode: 'design', ...(answer ? { project_answer: answer } : {}), ...(wish ? { vendor_wish: wish } : {}) } })} onDiagramReady={() => { const id = outcome.design_id; if (typeof id === 'string') setReadyDesigns(old => old.has(id) ? old : new Set([...old, id])); }} open={() => { setDesignRevision(outcome.design_id ?? null); setDesignOpen(true); }} onExpired={onExpired} />}<div className="message-actions"><button className="copy icon-button" aria-label="Скопировать ответ" onClick={() => { void copy(message); }}><Icon name={copied === message.id ? 'check' : 'copy'} /></button><button className="regenerate-button" disabled={!!space.command} aria-label="Повторить в новой ветке" onClick={() => { void fork(message, 'regenerate'); }}><Icon name="refresh" />Новая ветка</button></div>{run && terminal(run.status) && <div className="message-run-state">{presentationPending ? <span>Показываем результат…</span> : <RunState run={run} />}</div>}{!presentationPending && value && message.id === value.messages.find(item => item.role === 'assistant' && item.run_id && completedHelpful(selectedRunMap.get(item.run_id)))?.id && message.run_id && <FeedbackPrompt key={`feedback-${value.chat.id}`} auth={auth} chatId={value.chat.id} runId={message.run_id} onExpired={onExpired} />}</div></article>;
+    return <article className="assistant-message" key={message.id} data-message-id={message.id}><div className="agent-mark"><Icon name="message" /></div><div className="message-content"><div className="author">{product.name}<span>{runLabel(run)}</span></div><div className="prose stream-prose">{shownAnswer(message.run_id ?? message.id, message.content)}</div><AnswerSources citations={citations} auth={auth} runId={message.run_id} onExpired={onExpired} />{value && typeof outcome?.design_id === 'string' && typeof outcome.design_revision === 'number' && <DesignResultCard ownerId={user.id} readiness={readReadiness(outcome?.design_readiness)} auth={auth} chatId={value.chat.id} id={outcome.design_id} revision={outcome.design_revision} ready={outcome.design_status === 'conceptual' || outcome.design_has_diagram === true} requirements={outcome.design_schema_version === 3} calculated={outcome.design_has_result === true} questions={outcome.design_has_questions === true} branchId={value.selected_branch_id} newer={latestProjectId !== null && latestProjectId !== outcome.design_id} questionsRefresh={questionsRefresh} disabled={!!space.command || space.sending || selectedRuns.some(item => !terminal(item.status))} onAnswer={(message, answer, wish) => space.execute({ kind: 'send', key: crypto.randomUUID(), chatId: value.chat.id, branchId: value.selected_branch_id, body: { branch_id: value.selected_branch_id, message, attachment_ids: [], web_mode: 'off', request_mode: 'design', ...(answer ? { project_answer: answer } : {}), ...(wish ? { vendor_wish: wish } : {}) } })} onDiagramReady={() => { const id = outcome.design_id; if (typeof id === 'string') setReadyDesigns(old => old.has(id) ? old : new Set([...old, id])); }} open={() => { setDesignRevision(outcome.design_id ?? null); setDesignOpen(true); }} onExpired={onExpired} />}<div className="message-actions"><button className="copy icon-button" aria-label="Скопировать ответ" onClick={() => { void copy(message); }}><Icon name={copied === message.id ? 'check' : 'copy'} /></button><button className="regenerate-button" disabled={!!space.command} aria-label="Повторить в новой ветке" onClick={() => { void fork(message, 'regenerate'); }}><Icon name="refresh" />Новая ветка</button></div>{run && terminal(run.status) && <div className="message-run-state">{presentationPending ? <span>Показываем результат…</span> : <RunState run={run} />}</div>}{run && terminal(run.status) && <DeveloperDiagnostics run={run} chatId={value?.chat.id ?? null} prompt={value?.messages.find(item => item.id === run.input_message_id)} />}{!presentationPending && value && message.id === value.messages.find(item => item.role === 'assistant' && item.run_id && completedHelpful(selectedRunMap.get(item.run_id)))?.id && message.run_id && <FeedbackPrompt key={`feedback-${value.chat.id}`} auth={auth} chatId={value.chat.id} runId={message.run_id} onExpired={onExpired} />}</div></article>;
   }
   if (knowledgeOpen && manager) return <>
     <div inert={groupsOpen || appearance || undefined}><Knowledge auth={auth} close={() => navigateKnowledge(false)} onExpired={onExpired} openGroups={() => setGroupsOpen(true)} /></div>

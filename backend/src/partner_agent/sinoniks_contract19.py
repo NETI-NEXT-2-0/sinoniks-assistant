@@ -17,6 +17,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from partner_agent.sinoniks_contract import Identifier, Protocol, SourceReference, StrictModel
 
@@ -271,18 +272,20 @@ class Requirements19(StrictModel):
                    *self.requests_for_vendor]
         ids = [item.id for item in objects]
         if len(ids) != len(set(ids)):
-            raise ValueError("Stable identifiers must be globally unique")
+            raise PydanticCustomError(
+                "duplicate_global_identifier", "Stable identifiers must be globally unique",
+            )
         networks = {item.id for item in self.networks}
         systems = {item.id: item for item in self.systems}
         actors = {item.id: item for item in self.actors}
 
         def reference(value: str | None, known: Container[str]) -> None:
             if value is not None and value not in known:
-                raise ValueError(f"Unknown reference: {value}")
+                raise PydanticCustomError("unknown_reference", f"Unknown reference: {value}")
 
         def unique(values: list[str]) -> None:
             if len(values) != len(set(values)):
-                raise ValueError("Duplicate reference")
+                raise PydanticCustomError("duplicate_reference", "Duplicate reference")
 
         manual_actors: set[str] = set()
         reference(self.protected_network_id, networks)
@@ -294,7 +297,9 @@ class Requirements19(StrictModel):
             if flow.sender_network_id is not None and (
                 flow.sender_network_id == flow.receiver_network_id
             ):
-                raise ValueError("An exchange must cross the network boundary")
+                raise PydanticCustomError(
+                    "flow_not_crossing_boundary", "An exchange must cross the network boundary",
+                )
             for refs, network in ((flow.sender_ids, flow.sender_network_id),
                                   (flow.receiver_ids, flow.receiver_network_id)):
                 unique(refs)
@@ -303,20 +308,31 @@ class Requirements19(StrictModel):
                     system = systems[system_id]
                     if system.kind == "usb":
                         if flow.kind != "file":
-                            raise ValueError("USB cannot be a data-stream endpoint")
+                            raise PydanticCustomError(
+                                "usb_stream_endpoint", "USB cannot be a data-stream endpoint",
+                            )
                     elif network is not None and system.network_id is not None and (
                         system.network_id != network
                     ):
-                        raise ValueError("Endpoint is assigned to the wrong network")
+                        raise PydanticCustomError(
+                            "endpoint_network_mismatch",
+                            "Endpoint is assigned to the wrong network",
+                        )
             if isinstance(flow, FileFlow19):
                 unique([side.network_id for side in flow.sides])
                 for side in flow.sides:
                     reference(side.network_id, networks)
                     unique(side.actor_ids)
                     if side.manual is False and side.usb is False and side.actor_ids:
-                        raise ValueError("Manual actors require a manual or USB transfer")
+                        raise PydanticCustomError(
+                            "manual_actor_without_transfer",
+                            "Manual actors require a manual or USB transfer",
+                        )
                     if side.manual is False and side.manual_protocol is not None:
-                        raise ValueError("Manual protocol conflicts with disabled manual transfer")
+                        raise PydanticCustomError(
+                            "manual_protocol_disabled",
+                            "Manual protocol conflicts with disabled manual transfer",
+                        )
                     for actor in side.actor_ids:
                         reference(actor, actors)
                         if not actors[actor].is_collective():
@@ -329,16 +345,22 @@ class Requirements19(StrictModel):
                                 storage.network_id is not None
                                 and storage.network_id != side.network_id
                             ):
-                                raise ValueError("Automation requires storage on its own side")
+                                raise PydanticCustomError(
+                                    "automation_storage_mismatch",
+                                    "Automation requires storage on its own side",
+                                )
         if self.manual_users is not None and self.manual_users.upper is not None and (
             self.manual_users.upper < len(manual_actors)
         ):
-            raise ValueError("User count cannot be smaller than the distinct known actors")
+            raise PydanticCustomError(
+                "manual_users_under_count",
+                "User count cannot be smaller than the distinct known actors",
+            )
         for request in self.requests_for_vendor:
             reference(request.flow_id, {flow.id for flow in self.flows})
         paths = [item.path for item in self.unknowns]
         if len(paths) != len(set(paths)):
-            raise ValueError("Duplicate unknown path")
+            raise PydanticCustomError("duplicate_unknown_path", "Duplicate unknown path")
         document = self.model_dump(mode="json")
         notes: list[Unknown19 | Assumption19] = [*self.unknowns, *self.assumptions]
         for note in notes:
@@ -346,12 +368,16 @@ class Requirements19(StrictModel):
             if len(segments) >= 3 and segments[1] in {"networks", "systems", "flows"}:
                 owner = pointer_value(document, "/".join(segments[:3]))
                 if not isinstance(owner, dict) or owner.get("id") != note.target_id:
-                    raise ValueError("Note target ID must match the entity at its path")
+                    raise PydanticCustomError(
+                        "note_target_mismatch", "Note target ID must match the entity at its path",
+                    )
             elif note.target_id is not None:
-                raise ValueError("A root note has no target entity")
+                raise PydanticCustomError("root_note_target", "A root note has no target entity")
         for note in self.unknowns:
             if pointer_value(document, note.path) not in (None, []):
-                raise ValueError("An unknown note cannot hide a supplied value")
+                raise PydanticCustomError(
+                    "unknown_note_conflict", "An unknown note cannot hide a supplied value",
+                )
         for assumption in self.assumptions:
             pointer_value(document, assumption.path)
         return self

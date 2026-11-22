@@ -41,18 +41,43 @@ from partner_agent.sinoniks_contract19 import Requirements19
 RAG_RESPONSE_MAX_CHARS = 128000
 
 
+REQUIREMENTS19_RULE_CODES = frozenset({
+    "duplicate_global_identifier",
+    "unknown_reference",
+    "duplicate_reference",
+    "flow_not_crossing_boundary",
+    "usb_stream_endpoint",
+    "endpoint_network_mismatch",
+    "manual_actor_without_transfer",
+    "manual_protocol_disabled",
+    "automation_storage_mismatch",
+    "manual_users_under_count",
+    "duplicate_unknown_path",
+    "note_target_mismatch",
+    "root_note_target",
+    "unknown_note_conflict",
+})
+
+
 def safe_validation_diagnostics(error: ValidationError) -> dict[str, Any]:
     """Report schema paths/types only, never model-generated values or messages."""
     items: list[dict[str, Any]] = []
-    for issue in error.errors(include_input=False, include_context=False, include_url=False)[:20]:
-        location = issue.get("loc", ())
+    for issue in error.errors(include_input=False, include_context=True, include_url=False)[:100]:
+        context = issue.get("ctx") or {}
+        path_hint = context.get("path") if isinstance(context, dict) else None
+        location = path_hint if isinstance(path_hint, list) else issue.get("loc", ())
         path = [part if isinstance(part, int) else part[:64]
                 for part in location if isinstance(part, int)
                 or (isinstance(part, str) and part.isidentifier())]
-        items.append({"path": path[:12], "type": str(issue.get("type", "unknown"))[:64]})
+        error_type = str(issue.get("type", "unknown"))[:64]
+        item: dict[str, Any] = {"path": path[:24], "type": error_type,
+                                "message": str(issue.get("msg", "Validation failed"))[:1000]}
+        if error_type in REQUIREMENTS19_RULE_CODES:
+            item["rule"] = error_type
+            item["validator"] = "Requirements19.references"
+        items.append(item)
     return {"stage": "design_validation", "issues": items,
             "issue_count": error.error_count()}
-
 
 def decode_model_json(text: str) -> dict[str, Any]:
     """Reject ambiguous/unpersistable responses before validating their meaning."""
@@ -775,10 +800,18 @@ async def answer_with_provider(
         code = (exc.code if isinstance(exc, ProviderError) else
                 "provider_invalid_design" if isinstance(exc, (ValidationError, PatchError))
                 else "provider_invalid_rag_json")
-        diagnostics = (safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)
+        diagnostics: dict[str, Any] = (
+            safe_validation_diagnostics(exc) if isinstance(exc, ValidationError)
                        else {"stage": "design_validation", "reason": "design_object_missing"}
                        if code == "provider_invalid_design" else
                        {"stage": "provider_response_validation", "reason": code})
+        if settings.developer_diagnostics_enabled and settings.environment != "production":
+            # Full parsed model output for opted-in local debugging only.
+            # Provider headers and credentials are never included.
+            if isinstance(locals().get("decoded"), dict):
+                diagnostics["model_response"] = decoded
+            elif isinstance(locals().get("text"), str):
+                diagnostics["model_response_text"] = text[:32000]
         raise ProviderError(code, usage=normalize_usage(body.get("usage")),
                             diagnostics=diagnostics) from exc
     by_id = {item["evidence_id"]: item for item in evidence}
@@ -800,4 +833,7 @@ async def answer_with_provider(
             **({"no_changes": True} if no_changes else {}),
             **({"design": conditions} if conditions is not None else {}),
             **({"vendor_wishes": decoded["vendor_wishes"]}
-               if "vendor_wishes" in decoded else {})}
+               if "vendor_wishes" in decoded else {}),
+            **({"developer_model_response": decoded}
+               if settings.developer_diagnostics_enabled and settings.environment != "production"
+               else {})}
