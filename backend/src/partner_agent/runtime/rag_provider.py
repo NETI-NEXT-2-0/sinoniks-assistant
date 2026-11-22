@@ -15,6 +15,7 @@ from partner_agent.requirements_input import (
     bind_shared_file_checks,
     bind_usb_source,
     declared_log_transfer,
+    normalize_note_entity_paths,
 )
 from partner_agent.requirements_patch import (
     PatchError,
@@ -697,6 +698,7 @@ async def answer_with_provider(
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
                 proposal = normalize_optional_text(proposal)
+                normalize_note_entity_paths(proposal)
                 if request.new_project_id and patch is None:
                     bind_office_departments(proposal, question)
                     bind_shared_file_checks(proposal, question)

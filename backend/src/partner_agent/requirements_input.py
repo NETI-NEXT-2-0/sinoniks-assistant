@@ -15,6 +15,32 @@ _LOG_TRANSFER = re.compile(
 _SHARED_CHECKS = re.compile(r"\bпроверки\s+одинаковые\s*(?=[,.!?]|$)", re.I)
 
 
+def normalize_note_entity_paths(document: dict[str, Any]) -> None:
+    """Translate an unambiguous entity ID in a note into its JSON Pointer index.
+
+    This changes addressing only. Values, target IDs and unknown semantics still
+    pass through the full Requirements19 validator; invalid notes remain invalid.
+    """
+    for field in ("unknowns", "assumptions"):
+        notes = document.get(field)
+        if not isinstance(notes, list):
+            continue
+        for note in notes:
+            if not isinstance(note, dict) or not isinstance(note.get("path"), str):
+                continue
+            parts = note["path"].split("/")
+            if len(parts) < 3 or parts[1] not in ("networks", "systems", "flows"):
+                continue
+            entities = document.get(parts[1])
+            if not isinstance(entities, list) or parts[2].isdecimal():
+                continue
+            matches = [index for index, entity in enumerate(entities)
+                       if isinstance(entity, dict) and entity.get("id") == parts[2]]
+            if len(matches) == 1 and note.get("target_id") == parts[2]:
+                parts[2] = str(matches[0])
+                note["path"] = "/".join(parts)
+
+
 def declared_log_transfer(question: str, project_id: str) -> Requirements19 | None:
     statement = re.split(r"[.!?]", question.strip(), maxsplit=1)[0]
     match = _LOG_TRANSFER.match(statement)
