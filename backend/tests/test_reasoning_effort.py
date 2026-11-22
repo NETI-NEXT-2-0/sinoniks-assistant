@@ -10,7 +10,7 @@ from partner_agent.runtime.provider import chat_completion
 
 
 @pytest.mark.parametrize("wire", ["chat_completions", "responses"])
-@pytest.mark.parametrize("effort", [None, "low"])
+@pytest.mark.parametrize("effort", [None, "none", "low"])
 async def test_explicit_reasoning_effort_preserves_wire_format_and_ledger(wire, effort):
     calls = []
 
@@ -20,9 +20,9 @@ async def test_explicit_reasoning_effort_preserves_wire_format_and_ledger(wire, 
         if effort is None:
             assert "reasoning" not in payload and "reasoning_effort" not in payload
         elif wire == "chat_completions":
-            assert payload["reasoning_effort"] == "low" and "reasoning" not in payload
+            assert payload["reasoning_effort"] == effort and "reasoning" not in payload
         else:
-            assert payload["reasoning"] == {"effort": "low"}
+            assert payload["reasoning"] == {"effort": effort}
             assert "reasoning_effort" not in payload
         cap = "max_tokens" if wire == "chat_completions" else "max_output_tokens"
         assert payload[cap] == 6000
