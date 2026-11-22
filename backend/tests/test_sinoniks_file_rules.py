@@ -196,7 +196,7 @@ def test_f04_known_check_parameters_do_not_invent_extra_scope():
         ]),
         sender_ids=["office-store"], receiver_ids=["plant-store"],
     )])
-    assert not assess(request).issues
+    assert [issue.path for issue in assess(request).issues] == ["/flows/0/sides/0/checks"]
     result = calculate_file_rules(request, outside_network_id="office")
     assert len(result.rules) == result.lower_bound == 1
     assert result.minimum is None

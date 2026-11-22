@@ -110,7 +110,6 @@ class Assessment19(StrictModel):
 def assess(request: Requirements19) -> Assessment19:
     issues: list[ContractIssue19] = []
     unknown = {note.path for note in request.unknowns if note.reason == "user_unknown"}
-    documented_gaps = {note.path for note in request.unknowns}
     shared = {path: fields[0][0] for fields in request.pending_check_groups()
               for path, _, _ in fields}
 
@@ -190,10 +189,7 @@ def assess(request: Requirements19) -> Assessment19:
                     issue(path + "/manual", "Как передаются файлы на этой стороне: вручную, "
                           "автоматически из хранилища или с USB, если применимо?")
                 checks_path = path + "/checks"
-                if side.checks is None and (
-                    checks_path in shared or checks_path in documented_gaps
-                    or not flow.has_declared_checks()
-                ):
+                if side.checks is None:
                     common = shared.get(checks_path)
                     if common is None or common == checks_path:
                         issue(checks_path, "Уточните общий профиль проверок файлов." if common
