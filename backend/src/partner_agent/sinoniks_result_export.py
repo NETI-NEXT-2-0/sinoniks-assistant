@@ -10,7 +10,8 @@ FILE_ISSUE_LABELS = {
     "file_direction_unknown": "Не определено направление файлового обмена",
     "file_methods_unknown": "Не заданы стороны файлового обмена",
     "file_checks_unknown": "Не уточнены файловые проверки",
-    "file_check_scope_unconfirmed": "Отдельные проверки на этой стороне не заявлены",
+    "file_check_scope_unconfirmed": "Проверки этой стороны не подтверждены; "
+                                    "уточните профиль или выберите «Без проверок»",
     "file_visibility_unknown": "Не уточнена видимость принятых файлов",
     "file_method_unknown_or_unavailable": "Не уточнён или недоступен способ передачи файлов",
     "file_automation_details_unknown": "Не уточнены протокол или хранилище файлов",

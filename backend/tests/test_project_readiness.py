@@ -93,13 +93,13 @@ def test_known_check_parameters_are_requested_without_inventing_a_second_scope()
     raw["flows"][0]["sides"][1]["checks"] = None
     request, result, artifacts = build(raw)
     questions = {item["field"]: item for item in question_choices(request)}
-    assert "/flows/0/sides/1/checks" not in questions
+    assert "/flows/0/sides/1/checks" in questions
     assert {item["kind"] for field, item in questions.items() if field.endswith("/details")} == {
         "text",
     }
     assert questions["/flows/0/sides/0/checks/0/details"]["side_network_id"] == "plant"
     assert "/flows/0/sides/0/checks/1/details" in questions
-    assert "Отдельные проверки на этой стороне не заявлены" in artifacts["txt"]
+    assert "Проверки этой стороны не подтверждены" in artifacts["txt"]
     assert result["confirmed_rules_count"] is None
     raw["unknowns"] = [
         {"path": "/flows/0/sides/1/checks", "reason": "missing", "target_id": "files"},

@@ -32,19 +32,16 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
   function close() {
     if (busy) return;
     dialog.current?.close();
+    setDirectRating(null);
     setError('');
     opener.current?.focus();
   }
   function chooseRating(rating: number, button: HTMLButtonElement) {
     if (busy || directRating !== null) return;
     opener.current = button;
-    if (rating === 5) {
-      setError('');
-      dialog.current?.showModal();
-    } else {
-      setDirectRating(rating);
-      void send(rating, '');
-    }
+    setDirectRating(rating);
+    setError('');
+    dialog.current?.showModal();
   }
   async function send(rating: number, submittedComment: string) {
     if (busy) return;
@@ -72,19 +69,15 @@ export function FeedbackPrompt({ auth, chatId, runId, onExpired }: {
     </div>
     <button type="button" className="feedback-later" disabled={busy} onClick={() => setDismissed(true)}>Не сейчас</button>
     <span id={`feedback-notice-${chatId}`}>Администратор увидит оценку и ваш логин.</span>
-    {directRating !== null && (busy ? <span role="status">Отправляем оценку…</span> : error && <>
-      <span role="alert">{error}</span>
-      <button type="button" className="feedback-later" onClick={() => void send(directRating, '')}>Повторить отправку</button>
-    </>)}
     <dialog ref={dialog} className="feedback-dialog" aria-labelledby={`feedback-title-${chatId}`} onCancel={event => { event.preventDefault(); close(); }}>
-      <form onSubmit={event => { event.preventDefault(); void send(5, comment); }}>
+      <form onSubmit={event => { event.preventDefault(); if (directRating !== null) void send(directRating, comment); }}>
         <header><h2 id={`feedback-title-${chatId}`}>Что можно улучшить?</h2><button type="button" aria-label="Закрыть отзыв" disabled={busy} onClick={close}>×</button></header>
-        <div className="feedback-stars" aria-label="Оценка 5 из 5">★★★★★</div>
+        <div className="feedback-stars" aria-label={`Оценка ${directRating ?? 0} из 5`}>{'★'.repeat(directRating ?? 0)}{'☆'.repeat(5 - (directRating ?? 0))}</div>
         <label htmlFor={`feedback-${chatId}`}>Пожелание или комментарий <span>(необязательно)</span></label>
         <textarea autoFocus id={`feedback-${chatId}`} rows={4} maxLength={2000} value={comment} disabled={busy} onChange={event => setComment(event.target.value)} placeholder="Что было непонятно? Какой возможности не хватает?" />
         <p>Администратор увидит оценку, ваш логин и этот комментарий. Переписка не отправляется. Не указывайте пароли и конфиденциальные данные.</p>
         {error && <p role="alert">{error}</p>}
-        <footer><button type="button" disabled={busy} onClick={() => void send(5, '')}>Без комментария</button><button className="feedback-submit" disabled={busy}>{busy ? 'Отправляем…' : 'Отправить отзыв'}</button></footer>
+        <footer><button type="button" disabled={busy || directRating === null} onClick={() => { if (directRating !== null) void send(directRating, ''); }}>Без комментария</button><button className="feedback-submit" disabled={busy || directRating === null}>{busy ? 'Отправляем…' : 'Отправить отзыв'}</button></footer>
       </form>
     </dialog>
   </div>;

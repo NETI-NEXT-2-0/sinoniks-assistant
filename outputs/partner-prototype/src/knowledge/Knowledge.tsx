@@ -35,7 +35,7 @@ function message(error: unknown): string {
 }
 function warning(code: string): string {
   if (code === 'png_dpi_assumed') return 'У PNG нет данных о разрешении. Для распознавания использовано 150 DPI. Сверьте таблицы с оригиналом.';
-  if (code === 'native_text_order_uncertain') return 'Порядок текста в PDF может быть неверным. Согласование заблокировано до исправления источника.';
+  if (code === 'native_text_order_uncertain') return 'Порядок текста в PDF может быть неверным. Сверьте копию с оригиналом, исправьте порядок и подтвердите проверку ниже.';
   if (code === 'element_locator_without_page_bbox') return 'Для некоторых фрагментов нет координат страницы.';
   return 'При обработке обнаружено предупреждение. Проверьте текст и примечания.';
 }
@@ -93,6 +93,7 @@ export function Knowledge({ auth, close, onExpired, openGroups }: Props) {
   const [aclConfirmed, setAclConfirmed] = useState(false);
   const [withdrawRevision, setWithdrawRevision] = useState<number | null>(null);
   const [approvalConfirmed, setApprovalConfirmed] = useState(false);
+  const [textOrderConfirmed, setTextOrderConfirmed] = useState(false);
   const [syncError, setSyncError] = useState(false);
   const [reviewText, setReviewText] = useState('');
   const [title, setTitle] = useState('');
@@ -176,6 +177,7 @@ export function Knowledge({ auth, close, onExpired, openGroups }: Props) {
     } finally { setBusy(false); }
   }
   async function loadReview(version: KnowledgeVersion): Promise<void> {
+    setTextOrderConfirmed(false);
     setBusy(true); setError(null); setNotice(''); setAclReview(null); setAclConfirmed(false); setApprovalConfirmed(false);
     try {
       const result = await reviewPreview(auth, version.id);
@@ -189,6 +191,7 @@ export function Knowledge({ auth, close, onExpired, openGroups }: Props) {
     try {
       await auth.mutate(`/knowledge/versions/${reviewVersion.id}/approve`, 'POST', {
         expected_revision: current.revision, canonical_sha256: page.canonical_sha256, reviewed_text: reviewText,
+        ...(textOrderConfirmed ? { text_order_confirmed: true } : {}),
       });
       setPage(null); setReviewVersion(null); setReviewText(''); await refresh(current.id);
       setNotice('Фрагменты согласованы. Дождитесь подготовки версии к публикации.');
@@ -349,14 +352,15 @@ export function Knowledge({ auth, close, onExpired, openGroups }: Props) {
           {(page.warnings.length > 0 || page.quality_block || page.unresolved_notes || page.required_notes.length > 0) && <div className="knowledge-warnings" role="status">
             {page.warnings.map((item) => <p key={item}>{warning(item)}</p>)}
             {page.quality_block === 'unlinked_footnote_review_required' && <p>Не удалось надёжно связать примечание с текстом. Исправьте источник перед согласованием.</p>}
+            {page.quality_block === 'manual_quality_review_required' && <label><input type="checkbox" checked={textOrderConfirmed} disabled={busy} onChange={event => setTextOrderConfirmed(event.target.checked)} />Я сверил порядок и смысл текста с оригиналом PDF и исправил проверенную копию.</label>}
             {page.quality_block && !['unlinked_footnote_review_required', 'manual_quality_review_required'].includes(page.quality_block) && <p>Качество документа требует проверки перед согласованием.</p>}
             {page.unresolved_notes && <p>Не удалось найти обязательное примечание. Исправьте источник перед согласованием.</p>}
             {page.required_notes.length > 0 && <p>Обязательные примечания: фрагменты {page.required_notes.map((number) => number + 1).join(', ')}. Включите их в редакторе.</p>}
           </div>}
           <div className="knowledge-review-hint"><strong>Подсвечены возможные чувствительные данные</strong><p>Подсказки помогают найти возможные чувствительные сведения. Удаляйте только нужные символы или исправляйте текст прямо в копии.</p><details><summary>О проверке и хранении оригинала</summary><p>Контакты, реквизиты и ключи доступа определяются локальными правилами. Проверка может ошибаться и не находит все чувствительные сведения. Редактирование копии не изменяет оригинал; право на его скачивание открывает файл целиком.</p></details></div>
           {page.next_offset !== null && <div className="knowledge-warnings" role="alert">В документе больше 1000 фрагментов. Показаны первые 1000 из {page.total_blocks}. Разделите исходник на несколько файлов перед согласованием.</div>}
-          <DocumentEditor key={reviewVersion?.id} original={page.blocks.map(block => block.text).join('\n\n')} value={reviewText} disabled={busy} onChange={next => { setReviewText(next); setApprovalConfirmed(false); }} />
-          <div className="knowledge-review-footer"><label className="knowledge-approval-confirm"><input type="checkbox" checked={approvalConfirmed} disabled={busy || page.next_offset !== null} onChange={event => setApprovalConfirmed(event.target.checked)} />Я проверил редакцию текста и подтверждаю её добавление в базу знаний. Цитаты будут взяты из этой копии.</label><button className="knowledge-primary" disabled={busy || !reviewText.trim() || !approvalConfirmed || page.next_offset !== null || !!page.quality_block || page.unresolved_notes} onClick={() => { void approve(); }}>Подтвердить и подготовить к публикации</button></div>
+          <DocumentEditor key={reviewVersion?.id} original={page.blocks.map(block => block.text).join('\n\n')} value={reviewText} disabled={busy} onChange={next => { setReviewText(next); setApprovalConfirmed(false); setTextOrderConfirmed(false); }} />
+          <div className="knowledge-review-footer"><label className="knowledge-approval-confirm"><input type="checkbox" checked={approvalConfirmed} disabled={busy || page.next_offset !== null} onChange={event => setApprovalConfirmed(event.target.checked)} />Я проверил редакцию текста и подтверждаю её добавление в базу знаний. Цитаты будут взяты из этой копии.</label><button className="knowledge-primary" disabled={busy || !reviewText.trim() || !approvalConfirmed || page.next_offset !== null || (!!page.quality_block && !(page.quality_block === 'manual_quality_review_required' && textOrderConfirmed)) || page.unresolved_notes} onClick={() => { void approve(); }}>Подтвердить и подготовить к публикации</button></div>
         </section>}</>}
     </main></div>
   </section></div>;

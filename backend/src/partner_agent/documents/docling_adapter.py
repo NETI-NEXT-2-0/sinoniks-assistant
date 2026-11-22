@@ -265,9 +265,9 @@ def normalize_docling(
     )
 
 
-def assert_reviewable(document: ParsedDocument) -> None:
+def assert_reviewable(document: ParsedDocument, *, text_order_confirmed: bool = False) -> None:
     """Quality uncertainty blocks automatic readiness; a curator must resolve it."""
-    if "native_text_order_uncertain" in document.warnings:
+    if "native_text_order_uncertain" in document.warnings and not text_order_confirmed:
         raise CanonicalError("manual_quality_review_required")
     footnotes = [block for block in document.blocks if block.kind == "footnote"]
     linked = {link.text for link in document.footnote_relationships}

@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from partner_agent.sinoniks_contract19 import Requirements19
+from partner_agent.sinoniks_contract19 import Requirements19, Unknown19, pointer_value
 
 _OFFICE_DEPARTMENTS = re.compile(
     r"\b(?:отдел\w*|подразделени\w*)\s+в\s+(?:одной\s+)?офисной\s+сети\b", re.I,
@@ -13,6 +13,89 @@ _LOG_TRANSFER = re.compile(
     re.I,
 )
 _SHARED_CHECKS = re.compile(r"\bпроверки\s+одинаковые\s*(?=[,.!?]|$)", re.I)
+
+
+def normalize_note_entity_paths(document: dict[str, Any]) -> None:
+    """Translate an unambiguous entity ID in a note into its JSON Pointer index.
+
+    This changes addressing only. A missing owner can be derived from an indexed
+    path; conflicting explicit IDs and unknown semantics still pass through the
+    full Requirements19 validator. Invalid notes remain invalid.
+    """
+    for field in ("unknowns", "assumptions"):
+        notes = document.get(field)
+        if not isinstance(notes, list):
+            continue
+        for note in notes:
+            if not isinstance(note, dict) or not isinstance(note.get("path"), str):
+                continue
+            parts = note["path"].split("/")
+            if len(parts) < 3 or parts[1] not in ("networks", "systems", "flows"):
+                continue
+            entities = document.get(parts[1])
+            if not isinstance(entities, list):
+                continue
+            if parts[2].isdecimal():
+                try:
+                    pointer_value(document, note["path"])
+                    owner = pointer_value(document, "/".join(parts[:3]))
+                except (ValueError, IndexError):
+                    continue
+                if isinstance(owner, dict) and note.get("target_id") is None:
+                    note["target_id"] = owner.get("id")
+                continue
+            matches = [index for index, entity in enumerate(entities)
+                       if isinstance(entity, dict) and entity.get("id") == parts[2]]
+            if len(matches) == 1 and note.get("target_id") == parts[2]:
+                parts[2] = str(matches[0])
+                note["path"] = "/".join(parts)
+
+
+def discard_stale_missing_notes(document: dict[str, Any]) -> None:
+    """Remove redundant model bookkeeping only when its supplied value is known.
+
+    This never supplies a value, changes an explicit user_unknown, fixes a bad
+    pointer/owner, or relaxes the canonical import/editor validator.
+    """
+    notes = document.get("unknowns")
+    if not isinstance(notes, list):
+        return
+    remaining = []
+    for item in notes:
+        try:
+            note = Unknown19.model_validate(item)
+            parts = note.path.split("/")
+            if len(parts) >= 3 and parts[1] in {"networks", "systems", "flows"}:
+                owner = pointer_value(document, "/".join(parts[:3]))
+                if not isinstance(owner, dict) or owner.get("id") != note.target_id:
+                    raise ValueError("Unknown owner")
+            elif note.target_id is not None:
+                raise ValueError("Root owner")
+            if note.reason == "missing" and pointer_value(document, note.path) not in (None, []):
+                continue
+        except ValueError:
+            pass  # Leave malformed notes for the full validator to reject.
+        remaining.append(item)
+    document["unknowns"] = remaining
+
+
+def normalize_file_side_actor_ids(document: dict[str, Any]) -> None:
+    """Accept an unambiguous list-of-IDs spelling without inventing actors."""
+    flows = document.get("flows")
+    if not isinstance(flows, list):
+        return
+    for flow in flows:
+        if not isinstance(flow, dict) or flow.get("kind") != "file":
+            continue
+        sides = flow.get("sides")
+        if not isinstance(sides, list):
+            continue
+        for side in sides:
+            if not isinstance(side, dict) or "actor_ids" in side:
+                continue
+            aliases = side.get("actors")
+            if isinstance(aliases, list) and all(isinstance(item, str) for item in aliases):
+                side["actor_ids"] = side.pop("actors")
 
 
 def declared_log_transfer(question: str, project_id: str) -> Requirements19 | None:
