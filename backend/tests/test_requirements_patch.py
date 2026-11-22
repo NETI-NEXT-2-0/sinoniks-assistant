@@ -203,11 +203,14 @@ async def test_too_small_declared_window_stops_before_provider_call(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_provider_patch_applies_only_to_captured_base(monkeypatch):
+@pytest.mark.parametrize('nested', [False, True])
+async def test_provider_patch_applies_only_to_captured_base(monkeypatch, nested):
     async def model(settings, messages):
+        patch = {"operations": [edit(name="Новое имя")]}
         return {"choices": [{"message": {"content": json.dumps({
-            "answer": "Переименовал", "mode": "design", "design": None, "citations": [],
-            "design_patch": {"operations": [edit(name="Новое имя")]},
+            "answer": "Переименовал", "mode": "design", "citations": [],
+            **({'design': {'design_patch': patch}} if nested
+               else {'design': None, 'design_patch': patch}),
         })}}]}
     monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
     settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
@@ -220,6 +223,20 @@ async def test_provider_patch_applies_only_to_captured_base(monkeypatch):
     with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
         await answer_with_provider(settings, "Переименуй", [], design_context=base,
                                    request_mode="reference")
+
+
+@pytest.mark.asyncio
+async def test_competing_patch_envelopes_are_rejected(monkeypatch):
+    async def model(settings, messages):
+        patch = {'operations': [edit(name='Новое имя')]}
+        return {'choices': [{'message': {'content': json.dumps({
+            'answer': 'Правка', 'mode': 'design', 'citations': [],
+            'design': {'design_patch': patch}, 'design_patch': patch,
+        })}}]}
+    monkeypatch.setattr('partner_agent.runtime.rag_provider.chat_completion', model)
+    settings = Settings(database_url='postgresql+psycopg://u:p@localhost/db')
+    with pytest.raises(ProviderError, match='provider_invalid_design_patch'):
+        await answer_with_provider(settings, 'Переименуй', [], design_context=data_project())
 
 
 @pytest.mark.asyncio
@@ -237,6 +254,38 @@ async def test_initial_provider_blank_policy_saves_as_unknown(monkeypatch):
     result = await answer_with_provider(settings, "Построй", [], prepared=prepared)
     assert result["design"].flows[0].policy is None
     assert result["design"].flows[0].destination_port == 514
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_patch_reports_actual_saved_state_without_a_fake_edit(monkeypatch):
+    async def model(settings, messages):
+        return {"choices": [{"message": {"content": json.dumps({
+            "answer": "Я удалил все серверы", "mode": "design", "design": None,
+            "design_patch": {"operations": []}, "citations": [],
+        })}}]}
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    base = data_project()
+    before = deepcopy(base)
+    result = await answer_with_provider(settings, "Условия уже заданы", [], design_context=base)
+    assert result["answer_mode"] == "project_explanation" and result["no_changes"] is True
+    assert "design" not in result and base == before
+    assert "Новая версия не создана" in result["answer"]
+    assert "Я удалил" not in result["answer"]
+    with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
+        await answer_with_provider(settings, "Создай проект", [])
+
+
+def test_unchanged_project_preserves_historical_explanation_and_bounds_large_archive():
+    from partner_agent.runtime.runner import unchanged_project_answer
+
+    stored = "Архивный расчёт: 99 пользователей. Правило UDP/514."
+    assert unchanged_project_answer("Изменений нет.", stored).endswith(stored)
+    assert unchanged_project_answer("Изменений нет.", None) == "Изменений нет."
+    large = "Правил: 128.\n" + "Отдельное правило: UDP / порт 514.\n" * 500
+    bounded = unchanged_project_answer("Изменений нет.", large)
+    assert len(bounded) < 12000 and "Показана часть пояснения" in bounded
+    assert "128" in bounded
 
 
 def test_large_utf8_context_stays_below_tariff_tier_before_any_call():

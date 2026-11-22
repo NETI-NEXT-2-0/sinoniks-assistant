@@ -7,11 +7,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
 from partner_agent.infra.settings import ROUTER_ENDPOINT, Settings
 from partner_agent.runtime.accounting import track_model_call
+from partner_agent.runtime.output_schema import current_output_schema
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 RESPONSE_CHUNK_BYTES = 64 * 1024
@@ -293,6 +295,29 @@ async def chat_completion(
     if settings.model_wire_api == "chat_completions":
         payload = {"model": settings.model_name, "messages": messages, "stream": False,
                    "max_tokens": settings.model_max_output_tokens}
+    if settings.model_reasoning_effort is not None:
+        # Polza silently ignores OpenAI's top-level reasoning_effort.
+        # Its unified API requires reasoning.effort on both wire formats.
+        polza = urlsplit(settings.model_endpoint).hostname in {"polza.ai", "api.polza.ai"}
+        if settings.model_wire_api == "chat_completions" and not polza:
+            payload["reasoning_effort"] = settings.model_reasoning_effort
+        else:
+            payload["reasoning"] = {"effort": settings.model_reasoning_effort}
+    schema = current_output_schema() if settings.model_structured_design_output else None
+    if schema is not None:
+        output_format = {"type": "json_schema", "name": "sinoniks_new_project", "strict": True,
+                         "schema": schema}
+        if settings.model_wire_api == "chat_completions":
+            payload["response_format"] = {"type": "json_schema", "json_schema": {
+                key: value for key, value in output_format.items() if key != "type"
+            }}
+        else:
+            payload["text"] = {"format": output_format}
+    elif settings.model_json_output:
+        if settings.model_wire_api == "chat_completions":
+            payload["response_format"] = {"type": "json_object"}
+        else:
+            payload["text"] = {"format": {"type": "json_object"}}
     if settings.model_contest_mode and settings.model_endpoint.rstrip("/") == ROUTER_ENDPOINT:
         payload["provider"] = {
             "order": [settings.model_provider_variant],
@@ -307,7 +332,7 @@ async def chat_completion(
     if settings.model_endpoint.rstrip("/") == "https://polza.ai/api/v1":
         if not settings.model_provider_variant or settings.model_wire_api != "chat_completions":
             raise ProviderError("provider_route_required")
-        payload["response_format"] = {"type": "json_object"}
+        payload.setdefault("response_format", {"type": "json_object"})
         payload["provider"] = {
             "only": [settings.model_provider_variant],
             "allow_fallbacks": False,

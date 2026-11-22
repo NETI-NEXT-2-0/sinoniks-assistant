@@ -25,6 +25,7 @@ class ReviewedCopy(BaseModel):
     version_id: UUID
     canonical_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     text: str = Field(min_length=1, max_length=1_000_000)
+    text_order_confirmed: bool = Field(default=False, strict=True, exclude_if=lambda v: not v)
     locator_profile: Literal["markdown-atx-v1"] | None = Field(
         default=None, exclude_if=lambda value: value is None,
     )

@@ -14,6 +14,7 @@ from partner_agent.infra.models import utcnow
 from partner_agent.infra.models_accounting import ModelCall
 from partner_agent.infra.settings import Settings
 from partner_agent.runtime.accounting_math import priced_usage, usage_record
+from partner_agent.runtime.output_schema import output_schema_sha256
 
 _run: ContextVar[UUID | None] = ContextVar("model_accounting_run", default=None)
 
@@ -39,6 +40,11 @@ def tariff_snapshot(settings: Settings) -> dict[str, Any]:
     return {
         "catalog_id": settings.model_catalog_id or None,
         "provider_variant": settings.model_provider_variant or None,
+        "reasoning_effort": settings.model_reasoning_effort,
+        "json_output": settings.model_json_output,
+        "structured_design_output": settings.model_structured_design_output,
+        "output_schema_sha256": output_schema_sha256(),
+        "max_output_tokens": settings.model_max_output_tokens,
         "snapshot": settings.model_price_snapshot or None,
         "contest_mode": settings.model_contest_mode,
         "input_usd_per_million": str(settings.model_input_usd_per_million) if declared else None,

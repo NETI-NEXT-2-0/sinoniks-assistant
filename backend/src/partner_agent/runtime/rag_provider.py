@@ -15,6 +15,9 @@ from partner_agent.requirements_input import (
     bind_shared_file_checks,
     bind_usb_source,
     declared_log_transfer,
+    discard_stale_missing_notes,
+    normalize_file_side_actor_ids,
+    normalize_note_entity_paths,
 )
 from partner_agent.requirements_patch import (
     PatchError,
@@ -24,6 +27,7 @@ from partner_agent.requirements_patch import (
 )
 from partner_agent.requirements_service import without_sources
 from partner_agent.runs.types import RequestMode
+from partner_agent.runtime.output_schema import new_project_output_schema, output_schema_scope
 from partner_agent.runtime.provider import (
     ProviderError,
     chat_completion,
@@ -174,9 +178,19 @@ def prepare_request(
         "Use only the supplied evidence for organization-specific facts, files, prices "
         "and policies. "
         "When evidence is insufficient, explain the gap or ask; do not invent document facts. "
-        "Return JSON with keys answer, citations and mode. Mode is conversation for ordinary "
-        "conversation/general assistance, grounded for source-based answers, or insufficient for "
-        "missing document evidence. Grounded answers require at least one citation. "
+        "Return JSON with keys answer, citations, mode and design. Choose the mode before "
+        "drafting the answer. A request to place equipment, calculate rules, build a scheme, "
+        "or change the user's infrastructure is mode=design: return its structured conditions "
+        "even when incomplete. A prose explanation alone does not create a project. Product "
+        "citations can accompany a design; their presence never changes it to grounded. "
+        "Use grounded for source-based product questions without a request to build or edit "
+        "infrastructure, conversation for ordinary conversation/general assistance, and "
+        "insufficient for missing evidence or an ambiguous edit needing clarification. "
+        "A product how-to or capability comparison remains grounded, including follow-ups "
+        "accepting a supported alternative. 'Use the external service; explain how it differs' "
+        "does not itself request a network project. Do not create placeholder networks or "
+        "flows for an educational question. A vendor wish alone also leaves design=null. "
+        "Grounded answers require at least one citation. "
         "Conversation has an empty citations list. "
         "Select only the short bracketed Evidence handles, such as source_1. "
         'Return citations as [{"evidence_id":"source_1"}]; use [] if no source applies. '
@@ -320,6 +334,9 @@ def prepare_request(
             "When the two networks, protocol and direction are stated, extract the data flow "
             "even if the individual endpoints are unnamed. Leave their ID lists empty. "
             "MQTT uses two-way transport even when only the sender publishes telemetry. "
+            "In the Sinoniks 1.9 case, NTP time distribution is application=ntp, protocol=UDP, "
+            "mode=one-way INTO the protected network. Multiple time receivers still share "
+            "one NTP rule; do not make it two-way for clock-request replies. "
             "Do not invent a port or assume that reverse payloads are allowed. "
             "File also has "
             "direction:null|'forward'|'both',sides:[{network_id,manual:null|boolean,usb:null|boolean,"
@@ -332,6 +349,7 @@ def prepare_request(
             "Use the same optional checks_group identifier on file sides only when the user "
             "explicitly specifies a shared checking profile for those sides. Apply an answer "
             "to a shared-profile question to all sides with that identifier. "
+            "File sides use actor_ids (a list of existing actor IDs), never actors. "
             "The other arrays are "
             "actors:[{id,name}],unknowns:[{path,reason:'missing'|'user_unknown',"
             "target_id}],assumptions:[{path,target_id,explanation,basis:'product_fact'|"
@@ -648,7 +666,24 @@ async def answer_with_provider(
     if request.request_mode != request_mode:
         raise ProviderError("provider_request_mode_violation")
     evidence = request.evidence
-    body = await chat_completion(settings, request.messages)
+    schema = (new_project_output_schema(list(request.citation_aliases))
+              if settings.model_structured_design_output and request.new_project_id
+              and request.input_version == 3 else None)
+    messages = request.messages
+    if schema is not None:
+        messages = [{**messages[0], "content": messages[0]["content"] + (
+            " Structured new-project output follows the supplied JSON Schema. Omit design.id: "
+            "the server assigns it. All other facts and references still require validation."
+        )}, *messages[1:]]
+        # The grammar is also input: reserve its UTF-8 size below the existing cap.
+        schema_bytes = len(json.dumps(schema, ensure_ascii=False).encode())
+        message_bytes = sum(len(item["content"].encode()) + 64 for item in messages)
+        cap = min(256000, settings.model_context_window_tokens - settings.model_max_output_tokens)
+        if cap <= 0 or message_bytes + schema_bytes + 512 > cap:
+            raise ProviderError("rag_context_limit")
+    with output_schema_scope(schema):
+        body = await chat_completion(settings, messages)
+    no_changes = False
     try:
         if settings.model_wire_api == "responses" and "output" in body:
             text, usage = responses_result(body, max_chars=RAG_RESPONSE_MAX_CHARS)
@@ -667,13 +702,24 @@ async def answer_with_provider(
             raise ProviderError("provider_missing_grounded_citation")
         proposal = decoded.get("design")
         patch = decoded.get("design_patch")
+        # Accept only an exact alternate envelope; never merge competing edits
+        # or treat arbitrary project fields as patch operations.
+        if (patch is None and isinstance(proposal, dict)
+                and set(proposal) == {"design_patch"}):
+            patch, proposal = proposal["design_patch"], None
         if patch is not None:
             if (mode != "design" or proposal is not None or request_mode == "reference"
                     or request.patch_base is None):
                 raise ProviderError("provider_invalid_design_patch")
-            proposal = without_sources(
-                apply_patch(request.patch_base, patch).model_dump(mode="json"),
-            )
+            if patch == {"operations": []}:
+                validated = {"answer": "Новая версия не создана: модель не предложила "
+                             "изменений. Сохранённый проект остаётся доступным.",
+                             "citations": []}
+                mode, patch, no_changes = "project_explanation", None, True
+            else:
+                proposal = without_sources(
+                    apply_patch(request.patch_base, patch).model_dump(mode="json"),
+                )
         if request_mode == "reference" and (
             mode == "design" or proposal is not None
         ):
@@ -682,7 +728,7 @@ async def answer_with_provider(
             "design", "project_explanation", "insufficient",
         ):
             raise ProviderError("provider_request_mode_violation")
-        if mode == "project_explanation" and not request.can_explain_project:
+        if mode == "project_explanation" and not request.can_explain_project and not no_changes:
             raise ProviderError("provider_request_mode_violation")
         conditions: DesignInput | Requirements19 | None = None
         if mode == "insufficient" and proposal is None and request.new_project_id:
@@ -696,7 +742,12 @@ async def answer_with_provider(
             if request.input_version == 3:
                 if without_sources(proposal) != proposal:
                     raise ProviderError("provider_invalid_design_provenance")
+                if schema is not None and request.new_project_id:
+                    proposal = {**proposal, "id": request.new_project_id}
                 proposal = normalize_optional_text(proposal)
+                normalize_note_entity_paths(proposal)
+                normalize_file_side_actor_ids(proposal)
+                discard_stale_missing_notes(proposal)
                 if request.new_project_id and patch is None:
                     bind_office_departments(proposal, question)
                     bind_shared_file_checks(proposal, question)
@@ -746,6 +797,7 @@ async def answer_with_provider(
         if source.get("web_source"):
             citation["web_source"] = source["web_source"]
     return {**validated, "usage": usage, "answer_mode": mode,
+            **({"no_changes": True} if no_changes else {}),
             **({"design": conditions} if conditions is not None else {}),
             **({"vendor_wishes": decoded["vendor_wishes"]}
                if "vendor_wishes" in decoded else {})}

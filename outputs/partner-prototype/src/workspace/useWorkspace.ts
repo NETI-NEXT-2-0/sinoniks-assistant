@@ -64,7 +64,10 @@ export function useWorkspace(auth: AuthClient, onExpired: () => void) {
   const selectChat = useCallback(async (id: string, branchId?: string): Promise<void> => {
     const requestGeneration = ++generation.current;
     stop.current?.(); stop.current = null;
-    if (refreshTimer.current !== null) window.clearTimeout(refreshTimer.current);
+    if (refreshTimer.current !== null) {
+      window.clearTimeout(refreshTimer.current);
+      refreshTimer.current = null;
+    }
     const switching = selectedRef.current !== id || (!!branchId && branchRef.current !== branchId);
     selectedRef.current = id; branchRef.current = branchId;
     setSelected(id); setLoading(switching || !current.current); setError(null); setConnection('connecting');

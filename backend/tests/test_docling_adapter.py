@@ -101,6 +101,11 @@ def test_uncertain_reading_order_and_unlinked_footnotes_block_readiness():
     parsed = normalize_docling(data, uuid4(), uuid4(), "a" * 64, "docling-2.150.0")
     with pytest.raises(CanonicalError, match="manual_quality_review_required"):
         assert_reviewable(parsed)
+    assert_reviewable(parsed, text_order_confirmed=True)
+    # Confirmation covers text ordering only, never a lost qualification.
+    unlinked = parsed.model_copy(update={"footnote_relationships": ()})
+    with pytest.raises(CanonicalError, match="unlinked_footnote_review_required"):
+        assert_reviewable(unlinked, text_order_confirmed=True)
 
 
 @pytest.mark.parametrize(
