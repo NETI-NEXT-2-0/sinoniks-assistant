@@ -676,21 +676,9 @@ async def answer_with_provider(
                     or request.patch_base is None):
                 raise ProviderError("provider_invalid_design_patch")
             if patch == {"operations": []}:
-                from partner_agent.requirements_result import explanation19
-                from partner_agent.sinoniks_calculation import solve_project
-                from partner_agent.sinoniks_result_export import result_document
-
-                base = Requirements19.model_validate(request.patch_base)
-                saved = result_document(base, solve_project(base), session_id=base.id)
-                summary = explanation19(base, saved)
-                if len(summary) > 8000:
-                    summary = summary[:8000].rsplit("\n", 1)[0] + (
-                        "\n\nПоказана часть пояснения. Полный расчёт, правила и выгрузки "
-                        "доступны в сохранённом проекте."
-                    )
                 validated = {"answer": "Новая версия не создана: модель не предложила "
-                             "изменений. Текущий сохранённый проект:\n\n"
-                             + summary, "citations": []}
+                             "изменений. Сохранённый проект остаётся доступным.",
+                             "citations": []}
                 mode, patch, no_changes = "project_explanation", None, True
             else:
                 proposal = without_sources(

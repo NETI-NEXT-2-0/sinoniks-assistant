@@ -254,19 +254,21 @@ async def test_empty_provider_patch_reports_actual_saved_state_without_a_fake_ed
     assert result["answer_mode"] == "project_explanation" and result["no_changes"] is True
     assert "design" not in result and base == before
     assert "Новая версия не создана" in result["answer"]
-    assert "514" in result["answer"] and "Я удалил" not in result["answer"]
-    large = data_project()
-    flow = large["flows"][0]
-    large["flows"] = [{**flow, "id": f"stream-{i}", "destination_port": 1000+i,
-                       "purpose": "Log records " * 30} for i in range(128)]
-    bounded = await answer_with_provider(
-        settings.model_copy(update={"model_context_window_tokens": 1050000}),
-        "Условия уже заданы", [], design_context=large,
-    )
-    assert len(bounded["answer"]) < 12000
-    assert "Показана часть пояснения" in bounded["answer"] and "128" in bounded["answer"]
+    assert "Я удалил" not in result["answer"]
     with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
         await answer_with_provider(settings, "Создай проект", [])
+
+
+def test_unchanged_project_preserves_historical_explanation_and_bounds_large_archive():
+    from partner_agent.runtime.runner import unchanged_project_answer
+
+    stored = "Архивный расчёт: 99 пользователей. Правило UDP/514."
+    assert unchanged_project_answer("Изменений нет.", stored).endswith(stored)
+    assert unchanged_project_answer("Изменений нет.", None) == "Изменений нет."
+    large = "Правил: 128.\n" + "Отдельное правило: UDP / порт 514.\n" * 500
+    bounded = unchanged_project_answer("Изменений нет.", large)
+    assert len(bounded) < 12000 and "Показана часть пояснения" in bounded
+    assert "128" in bounded
 
 
 def test_large_utf8_context_stays_below_tariff_tier_before_any_call():

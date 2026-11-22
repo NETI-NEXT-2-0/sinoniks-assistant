@@ -45,6 +45,19 @@ from partner_agent.runtime.recovery import recovery_message
 from partner_agent.sinoniks_contract19 import Requirements19
 
 
+def unchanged_project_answer(message: str, saved_explanation: str | None) -> str:
+    """Use the revision's stored explanation, never recalculate a historical result."""
+    if not saved_explanation:
+        return message
+    summary = saved_explanation
+    if len(summary) > 8000:
+        summary = summary[:8000].rsplit("\n", 1)[0] + (
+            "\n\nПоказана часть пояснения. Полный расчёт, правила и выгрузки "
+            "доступны в сохранённом проекте."
+        )
+    return message + "\n\n" + summary
+
+
 async def execute_run(
     run_id: UUID, *, dispatch_generation: int, scheduler_id: str | None = None
 ) -> dict[str, str]:
@@ -215,6 +228,8 @@ async def execute_run(
                     enforce_request_cap(settings, actual_cost)
                 answer_mode = result.get("answer_mode", "grounded")
                 answer = result["answer"]
+                if result.get("no_changes") and project is not None:
+                    answer = unchanged_project_answer(answer, project.artifacts.get("txt"))
                 if answer_mode == "project_explanation" and project is not None:
                     answer = f"По сохранённой ревизии №{project.revision}.\n\n{answer}"
                 elif (current_run.request_mode == "design" and answer_mode == "insufficient"
