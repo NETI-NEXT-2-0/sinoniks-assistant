@@ -682,9 +682,15 @@ async def answer_with_provider(
 
                 base = Requirements19.model_validate(request.patch_base)
                 saved = result_document(base, solve_project(base), session_id=base.id)
+                summary = explanation19(base, saved)
+                if len(summary) > 8000:
+                    summary = summary[:8000].rsplit("\n", 1)[0] + (
+                        "\n\nПоказана часть пояснения. Полный расчёт, правила и выгрузки "
+                        "доступны в сохранённом проекте."
+                    )
                 validated = {"answer": "Новая версия не создана: модель не предложила "
                              "изменений. Текущий сохранённый проект:\n\n"
-                             + explanation19(base, saved), "citations": []}
+                             + summary, "citations": []}
                 mode, patch, no_changes = "project_explanation", None, True
             else:
                 proposal = without_sources(
