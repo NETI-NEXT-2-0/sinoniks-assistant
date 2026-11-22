@@ -652,6 +652,7 @@ async def answer_with_provider(
         raise ProviderError("provider_request_mode_violation")
     evidence = request.evidence
     body = await chat_completion(settings, request.messages)
+    no_changes = False
     try:
         if settings.model_wire_api == "responses" and "output" in body:
             text, usage = responses_result(body, max_chars=RAG_RESPONSE_MAX_CHARS)
@@ -674,9 +675,21 @@ async def answer_with_provider(
             if (mode != "design" or proposal is not None or request_mode == "reference"
                     or request.patch_base is None):
                 raise ProviderError("provider_invalid_design_patch")
-            proposal = without_sources(
-                apply_patch(request.patch_base, patch).model_dump(mode="json"),
-            )
+            if patch == {"operations": []}:
+                from partner_agent.requirements_result import explanation19
+                from partner_agent.sinoniks_calculation import solve_project
+                from partner_agent.sinoniks_result_export import result_document
+
+                base = Requirements19.model_validate(request.patch_base)
+                saved = result_document(base, solve_project(base), session_id=base.id)
+                validated = {"answer": "Новая версия не создана: модель не предложила "
+                             "изменений. Текущий сохранённый проект:\n\n"
+                             + explanation19(base, saved), "citations": []}
+                mode, patch, no_changes = "project_explanation", None, True
+            else:
+                proposal = without_sources(
+                    apply_patch(request.patch_base, patch).model_dump(mode="json"),
+                )
         if request_mode == "reference" and (
             mode == "design" or proposal is not None
         ):
@@ -685,7 +698,7 @@ async def answer_with_provider(
             "design", "project_explanation", "insufficient",
         ):
             raise ProviderError("provider_request_mode_violation")
-        if mode == "project_explanation" and not request.can_explain_project:
+        if mode == "project_explanation" and not request.can_explain_project and not no_changes:
             raise ProviderError("provider_request_mode_violation")
         conditions: DesignInput | Requirements19 | None = None
         if mode == "insufficient" and proposal is None and request.new_project_id:
@@ -751,6 +764,7 @@ async def answer_with_provider(
         if source.get("web_source"):
             citation["web_source"] = source["web_source"]
     return {**validated, "usage": usage, "answer_mode": mode,
+            **({"no_changes": True} if no_changes else {}),
             **({"design": conditions} if conditions is not None else {}),
             **({"vendor_wishes": decoded["vendor_wishes"]}
                if "vendor_wishes" in decoded else {})}

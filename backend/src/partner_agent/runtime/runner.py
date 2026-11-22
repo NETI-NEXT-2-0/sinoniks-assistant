@@ -229,6 +229,8 @@ async def execute_run(
                      "citations": result["citations"],
                      "usage": result["usage"], "estimated_cost_usd": actual_cost,
                      "usage_complete": actual_cost is not None,
+                     **({"project_changed": False, "task_completed": False}
+                        if result.get("no_changes") else {}),
                      "answer_mode": answer_mode}, answer,
                     evidence=[*evidence, *history_sources],
                     design_input=result.get("design"), design_parent_id=project_parent,

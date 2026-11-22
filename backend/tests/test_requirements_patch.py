@@ -239,6 +239,26 @@ async def test_initial_provider_blank_policy_saves_as_unknown(monkeypatch):
     assert result["design"].flows[0].destination_port == 514
 
 
+@pytest.mark.asyncio
+async def test_empty_provider_patch_reports_actual_saved_state_without_a_fake_edit(monkeypatch):
+    async def model(settings, messages):
+        return {"choices": [{"message": {"content": json.dumps({
+            "answer": "Я удалил все серверы", "mode": "design", "design": None,
+            "design_patch": {"operations": []}, "citations": [],
+        })}}]}
+    monkeypatch.setattr("partner_agent.runtime.rag_provider.chat_completion", model)
+    settings = Settings(database_url="postgresql+psycopg://u:p@localhost/db")
+    base = data_project()
+    before = deepcopy(base)
+    result = await answer_with_provider(settings, "Условия уже заданы", [], design_context=base)
+    assert result["answer_mode"] == "project_explanation" and result["no_changes"] is True
+    assert "design" not in result and base == before
+    assert "Новая версия не создана" in result["answer"]
+    assert "514" in result["answer"] and "Я удалил" not in result["answer"]
+    with pytest.raises(ProviderError, match="provider_invalid_design_patch"):
+        await answer_with_provider(settings, "Создай проект", [])
+
+
 def test_large_utf8_context_stays_below_tariff_tier_before_any_call():
     with pytest.raises(ProviderError, match="rag_context_limit"):
         prepare_request("😀" * 65000, [], context_window_tokens=1050000,
