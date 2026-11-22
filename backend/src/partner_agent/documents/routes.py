@@ -289,6 +289,7 @@ class ApproveBody(RevisionBody):
     canonical_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     block_ids: list[UUID] = Field(default_factory=list, max_length=1000)
     reviewed_text: str | None = Field(default=None, min_length=1, max_length=1_000_000)
+    text_order_confirmed: bool = Field(default=False, strict=True)
 
 
 @router.post("/versions/{version_id}/approve", status_code=202)
@@ -308,7 +309,7 @@ async def approve_version(
     try:
         units = await approve_stored_canonical(
             db, actor, identifier, version_id, frozenset(body.block_ids), body.expected_revision,
-            body.canonical_sha256, body.reviewed_text,
+            body.canonical_sha256, body.reviewed_text, body.text_order_confirmed,
         )
     except CanonicalError:
         raise APIError(

@@ -1,6 +1,7 @@
 """Real PG/Garage/Qdrant: edited copy is authoritative, original remains private."""
 
 import hashlib
+import json
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,9 +25,11 @@ SOURCE = b"Course fee 100. Contact alice@example.test. Terms remain."
 EDIT = "Course fee 120. Contact . Terms remain.\nAdded public note."
 
 
-@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("binary,quality", [(False, False), (True, False), (True, True)])
 @pytest.mark.parametrize("tamper", [False, True])
-async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(plane, binary, tamper):
+async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(
+    plane, binary, quality, tamper,
+):
     client, headers, owner = await plane(role="admin")
     other, other_headers, _ = await plane(role="admin")
     created = await client.post(
@@ -49,6 +52,8 @@ async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(plane, bina
         else extract_utf8(SOURCE, document_id, version_id, "text/plain")
     )
     key, original_key = f"{document_id}/{version_id}/canonical.json", f"{version_id}/original"
+    if quality:
+        canonical = canonical.model_copy(update={"warnings": ("native_text_order_uncertain",)})
     adapter = storage()
     digest = adapter.put(
         adapter.derived_bucket, key, canonical.model_dump_json().encode(), "application/json"
@@ -82,6 +87,11 @@ async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(plane, bina
         assert (
             await client.post(path, headers=headers, json={**body, "canonical_sha256": "f" * 64})
         ).status_code == 409
+        if quality:
+            blocked = await client.post(path, headers=headers, json=body)
+            assert blocked.status_code == 409
+            assert blocked.json()["code"] == "canonical_review_required"
+            body["text_order_confirmed"] = True
         response = await client.post(path, headers=headers, json=body)
         assert response.status_code == 202, response.text
         async with session_factory()() as db:
@@ -89,6 +99,8 @@ async def test_reviewed_copy_is_exact_and_bound_to_approved_artifact(plane, bina
             assert version.disclosure_format == "curator-edited-v1"
             assert version.canonical_sha256 == digest
             edited_key = copy_key(document_id, version_id, version.reviewed_copy_sha256)
+            saved_copy = adapter.get(adapter.derived_bucket, edited_key).data
+            assert json.loads(saved_copy).get("text_order_confirmed", False) is quality
             units = list(
                 (
                     await db.scalars(

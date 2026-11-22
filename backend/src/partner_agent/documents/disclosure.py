@@ -130,7 +130,7 @@ async def _prepare_approved_disclosure(
     units: list[DisclosureUnit] = []
     if edited_copy is not None and copy_digest is not None:
         if isinstance(canonical, ParsedDocument):
-            assert_reviewable(canonical)
+            assert_reviewable(canonical, text_order_confirmed=edited_copy.text_order_confirmed)
         selected = iter(render_copy(edited_copy, copy_digest))
     elif isinstance(canonical, ParsedDocument):
         selected = iter(render_approved_docling(canonical, approved_block_ids))
@@ -175,6 +175,9 @@ async def _prepare_approved_disclosure(
         )
     )
     version.approved_canonical_sha256 = artifact_hash
+    if edited_copy is not None and edited_copy.text_order_confirmed:
+        db.add(AuditEvent(actor_id=actor.id, action="document.confirm_text_order",
+                          resource_id=str(version.id), result="success"))
     version.disclosure_format = (
         EDITED_FORMAT
         if edited_copy is not None
@@ -275,11 +278,15 @@ async def approve_stored_canonical(
     expected_revision: int,
     expected_canonical_sha256: str,
     reviewed_text: str | None = None,
+    text_order_confirmed: bool = False,
 ) -> tuple[DisclosureUnit, ...]:
     canonical, artifact_hash = await load_review_canonical(db, actor, document_id, version_id)
     if expected_canonical_sha256 != artifact_hash:
         raise APIError(409, "canonical_review_changed", "Review the current artifact")
     edited_copy, copy_digest = None, None
+    if text_order_confirmed and reviewed_text is None:
+        raise APIError(422, "edited_copy_required",
+                       "Text order confirmation requires a reviewed copy")
     if reviewed_text is not None:
         from starlette.concurrency import run_in_threadpool
 
@@ -288,12 +295,13 @@ async def approve_stored_canonical(
         if approved_block_ids:
             raise APIError(422, "ambiguous_review", "Choose either source blocks or an edited copy")
         if isinstance(canonical, ParsedDocument):
-            assert_reviewable(canonical)
+            assert_reviewable(canonical, text_order_confirmed=text_order_confirmed)
         edited_copy = ReviewedCopy(
             document_id=document_id,
             version_id=version_id,
             canonical_sha256=artifact_hash,
             text=reviewed_text,
+            text_order_confirmed=text_order_confirmed,
             locator_profile=(
                 MARKDOWN_LOCATORS
                 if isinstance(canonical, CanonicalDocument)
